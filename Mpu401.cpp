@@ -62,10 +62,10 @@
 
 #if RT_OPSYS == RT_OPSYS_LINUX
 #include "midialsa.h"
-typedef MIDIOutAlsa MIDIOutBackend;
+typedef MIDIAlsa MIDIBackend;
 #elif RT_OPSYS == RT_OPSYS_WINDOWS
 #include "midiwin.h"
-typedef MIDIOutWin MIDIOutBackend;
+typedef MIDIWin MIDIBackend;
 #endif
 
 /*********************************************************************************************************************************
@@ -100,16 +100,16 @@ typedef struct {
     RTIOPORT               uPort;
 
     /* Current state. */
-    /** Whether we have an input byte waiting to be read. */
+    /** Whether we have an input/result byte waiting to be read. */
     bool                   fHaveInput;
     /** Current input byte waiting to be read. */
     uint8_t                uInput;
     /** True if UART mode, false if regular/intelligent mode. */
     bool                   fModeUart;
-    /** MIDI output backend. */
-    MIDIOutBackend         midiOut;
+    /** MIDI backend. */
+    MIDIBackend            midi;
 
-	IOMIOPORTHANDLE        hIoPorts;
+    IOMIOPORTHANDLE        hIoPorts;
 } MPUSTATE;
 /** Pointer to the shared device state.  */
 typedef MPUSTATE *PMPUSTATE;
@@ -142,6 +142,15 @@ static uint8_t mpuReadData(PPDMDEVINS pDevIns)
         return pThis->uInput;
     }
 
+    if (pThis->fModeUart) {
+        uint8_t data;
+        ssize_t read = pThis->midi.read(&data, 1);
+        Log3Func(("read = %lld\n", read));
+        if (read == 1) {
+            return data;
+        }
+    }
+
     LogWarnFunc(("Trying to read, but no data to read\n"));
 
     return MPU_RESPONSE_ACK;
@@ -152,8 +161,8 @@ static void mpuWriteData(PPDMDEVINS pDevIns, uint8_t data)
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
     if (pThis->fModeUart) {
-        ssize_t written = pThis->midiOut.write(&data, 1);
-        LogFunc(("written = %lld\n", written));
+        ssize_t written = pThis->midi.write(&data, 1);
+        Log3Func(("written = %lld\n", written));
     } else {
         LogWarnFunc(("Ignoring data, not in UART mode\n"));
     }
@@ -175,11 +184,20 @@ static uint8_t mpuReadStatus(PPDMDEVINS pDevIns)
          0 - Data is available for reading
          1 - No data is available for reading */
 
-    // In the current design, we are always output ready
     uint8_t status = 0;
-    if (!pThis->fHaveInput) {
+
+    bool outputReady = !pThis->fModeUart || pThis->midi.writeAvail() >= 1;
+    if (!outputReady) {
+        status |= RT_BIT(6);
+    }
+
+    bool inputReady = pThis->fHaveInput
+            || (pThis->fModeUart && pThis->midi.readAvail() >= 1);
+    if (!inputReady) {
         status |= RT_BIT(7);
     }
+
+    LogFlow(("mpu status: outputReady=%RTbool inputReady=%RTbool\n", outputReady, inputReady));
 
     return status;
 }
@@ -206,6 +224,7 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
             case MPU_COMMAND_ENTER_UART:
+                Log(("Entering UART mode"));
                 pThis->fModeUart = true;
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
@@ -369,7 +388,7 @@ static DECLCALLBACK(int) mpuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
     AssertRCReturn(rc, rc);
 
     /* Open the MIDI device now. */
-    rc = pThis->midiOut.open("default");
+    rc = pThis->midi.open("default");
     AssertRCReturn(rc, rc);
 
     LogRel(("mpu401#%i: Configured on port 0x%x-0x%x\n", iInstance, pThis->uPort, pThis->uPort + MPU_IO_SIZE - 1));
@@ -384,7 +403,7 @@ static DECLCALLBACK(int) mpuR3Destruct(PPDMDEVINS pDevIns)
 {
     PMPUSTATE     pThis   = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
-    int rc = pThis->midiOut.close();
+    int rc = pThis->midi.close();
     AssertRCReturn(rc, rc);
 
     return VINF_SUCCESS;
@@ -408,7 +427,7 @@ static DECLCALLBACK(void) mpuR3PowerOff(PPDMDEVINS pDevIns)
 {
     PMPUSTATE     pThis   = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
-    int rc = pThis->midiOut.close();
+    int rc = pThis->midi.close();
     AssertRC(rc);
 }
 

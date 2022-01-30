@@ -25,20 +25,60 @@
 #include <alsa/asoundlib.h>
 #include "midialsa.h"
 
-MIDIOutAlsa::MIDIOutAlsa() : _out(NULL)
+#define MAX_POLL_FDS 4
+
+static ssize_t rawmidi_avail(snd_rawmidi_t *rmidi)
+{
+    struct pollfd pfds[MAX_POLL_FDS];
+
+    int nfds = snd_rawmidi_poll_descriptors(rmidi, pfds, MAX_POLL_FDS);
+    if (nfds <= 0) {
+        LogWarn(("ALSA rawmidi avail: no descriptors to poll!"));
+        return VERR_AUDIO_ENUMERATION_FAILED;
+    }
+
+    int ready = poll(pfds, nfds, 0);
+    if (ready < 0) {
+        if (errno != EAGAIN && errno != EINTR) {
+            LogWarnFunc(("Cannot poll, errno=%d", errno));
+            return VERR_AUDIO_STREAM_NOT_READY;
+        }
+        return 0;
+    } else if (ready == 0) {
+        return 0;
+    } else /* ready > 0 */ {
+        unsigned short revents;
+        int err = snd_rawmidi_poll_descriptors_revents(rmidi, pfds, nfds, &revents);
+        if (err != 0) {
+            LogWarnFunc(("Cannot call revents, err=%d", err));
+            return VERR_AUDIO_STREAM_NOT_READY;
+        }
+
+        if (revents & POLLNVAL) {
+            LogWarnFunc(("POLLNVAL"));
+        }
+        if (revents & POLLERR) {
+            LogWarnFunc(("POLLERR"));
+        }
+
+        return revents & (POLLIN | POLLOUT);
+    }
+}
+
+MIDIAlsa::MIDIAlsa() : _out(NULL)
 {
 
 }
 
-MIDIOutAlsa::~MIDIOutAlsa()
+MIDIAlsa::~MIDIAlsa()
 {
 }
 
-int MIDIOutAlsa::open(const char *dev)
+int MIDIAlsa::open(const char *dev)
 {
     int err;
 
-    if ((err = snd_rawmidi_open(NULL, &_out, "virtual", SND_RAWMIDI_NONBLOCK))) {
+    if ((err = snd_rawmidi_open(&_in, &_out, "virtual", SND_RAWMIDI_NONBLOCK))) {
         LogWarn(("ALSA rawmidi open error: %s\n", snd_strerror(err)));
         return VERR_AUDIO_STREAM_COULD_NOT_CREATE;
     }
@@ -49,8 +89,12 @@ int MIDIOutAlsa::open(const char *dev)
     return VINF_SUCCESS;
 }
 
-int MIDIOutAlsa::close()
+int MIDIAlsa::close()
 {
+    if (_in) {
+        snd_rawmidi_close(_in);
+        _in = NULL;
+    }
     if (_out) {
         snd_rawmidi_close(_out);
         _out = NULL;
@@ -58,7 +102,33 @@ int MIDIOutAlsa::close()
     return VINF_SUCCESS;
 }
 
-ssize_t MIDIOutAlsa::write(uint8_t *data, size_t len)
+ssize_t MIDIAlsa::writeAvail()
 {
-    return snd_rawmidi_write(_out, data, len);
+    return _out ? rawmidi_avail(_out) : 0;
+}
+
+
+ssize_t MIDIAlsa::write(uint8_t *data, size_t len)
+{
+    ssize_t result = snd_rawmidi_write(_out, data, len);
+    if (result < 0) {
+        LogWarn(("ALSA midi write error: %s", snd_strerror(result)));
+        return VERR_AUDIO_STREAM_NOT_READY;
+    }
+    return result;
+}
+
+ssize_t MIDIAlsa::readAvail()
+{
+    return _in ? rawmidi_avail(_in) : 0;
+}
+
+ssize_t MIDIAlsa::read(uint8_t *buf, size_t len)
+{
+    ssize_t result = snd_rawmidi_read(_out, buf, len);
+    if (result < 0) {
+        LogWarn(("ALSA midi read error: %s", snd_strerror(result)));
+        return VERR_AUDIO_STREAM_NOT_READY;
+    }
+    return result;
 }

@@ -24,18 +24,23 @@
 
 typedef struct _snd_rawmidi snd_rawmidi_t;
 
-class MIDIOutAlsa
+class MIDIAlsa
 {
 public:
-    MIDIOutAlsa();
-    ~MIDIOutAlsa();
+    MIDIAlsa();
+    ~MIDIAlsa();
 
     int open(const char *dev);
 	int close();
 
+    ssize_t writeAvail();
     ssize_t write(uint8_t *data, size_t len);
 
+    ssize_t readAvail();
+    ssize_t read(uint8_t *buf, size_t len);
+
 private:
+    snd_rawmidi_t *_in;
     snd_rawmidi_t *_out;
 };
 
