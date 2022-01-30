@@ -36,13 +36,13 @@ PCMOutAlsa::~PCMOutAlsa()
 
 int PCMOutAlsa::open(const char *dev, unsigned int sampleRate, unsigned int channels)
 {
-	int err;
+    int err;
 
     err = snd_pcm_open(&_pcm, dev, SND_PCM_STREAM_PLAYBACK, 0);
     if (err < 0) {
-		LogWarn(("ALSA playback open error: %s\n", snd_strerror(err)));
-		return VERR_AUDIO_STREAM_COULD_NOT_CREATE;
-	}
+        LogWarn(("ALSA playback open error: %s\n", snd_strerror(err)));
+        return VERR_AUDIO_STREAM_COULD_NOT_CREATE;
+    }
 
     // TODO: Right now, setting a too large period size means we will not let the main
     // thread run long enough to actually change notes/voices. Need some actual synchronization.
@@ -57,16 +57,16 @@ int PCMOutAlsa::open(const char *dev, unsigned int sampleRate, unsigned int chan
         return VERR_AUDIO_STREAM_COULD_NOT_CREATE;
     }
 
-	return VINF_SUCCESS;
+    return VINF_SUCCESS;
 }
 
 int PCMOutAlsa::close()
 {
-	if (_pcm) {
+    if (_pcm) {
         snd_pcm_drain(_pcm);
-		snd_pcm_close(_pcm);
-	}
-	return VINF_SUCCESS;
+        snd_pcm_close(_pcm);
+    }
+    return VINF_SUCCESS;
 }
 
 ssize_t PCMOutAlsa::avail()
@@ -104,16 +104,16 @@ int PCMOutAlsa::wait()
 
 ssize_t PCMOutAlsa::write(int16_t *buf, size_t n)
 {
-	snd_pcm_sframes_t frames = snd_pcm_writei(_pcm, buf, n);
-	if (frames < 0) {
-		LogFlow(("ALSA trying to recover from error: %s\n", snd_strerror(frames)));
-		frames = snd_pcm_recover(_pcm, frames, 0);
-	}
-	if (frames < 0) {
+    snd_pcm_sframes_t frames = snd_pcm_writei(_pcm, buf, n);
+    if (frames < 0) {
+        LogFlow(("ALSA trying to recover from error: %s\n", snd_strerror(frames)));
+        frames = snd_pcm_recover(_pcm, frames, 0);
+    }
+    if (frames < 0) {
         LogWarn(("ALSA write error: %s\n", snd_strerror(frames)));
-		return VERR_AUDIO_STREAM_NOT_READY;
-	}
-	return frames;
+        return VERR_AUDIO_STREAM_NOT_READY;
+    }
+    return frames;
 }
 
 int PCMOutAlsa::setParams(unsigned int sampleRate, unsigned int channels, unsigned int bufferTime, unsigned int periodTime)
@@ -175,19 +175,19 @@ int PCMOutAlsa::setParams(unsigned int sampleRate, unsigned int channels, unsign
     }
     err = snd_pcm_hw_params_get_buffer_size(hwparams, &_bufferSize);
     if (err < 0) {
-        printf("Unable to get buffer size for playback: %s\n", snd_strerror(err));
+        LogWarnFunc(("Unable to get buffer size for playback: %s\n", snd_strerror(err)));
         return err;
     }
 
     /* set the period time */
     err = snd_pcm_hw_params_set_period_time_near(_pcm, hwparams, &periodTime, NULL);
     if (err < 0) {
-        printf("Unable to set period time %u for playback: %s\n", periodTime, snd_strerror(err));
+        LogWarnFunc(("Unable to set period time %u for playback: %s\n", periodTime, snd_strerror(err)));
         return err;
     }
     err = snd_pcm_hw_params_get_period_size(hwparams, &_periodSize, NULL);
     if (err < 0) {
-        printf("Unable to get period size for playback: %s\n", snd_strerror(err));
+        LogWarnFunc(("Unable to get period size for playback: %s\n", snd_strerror(err)));
         return err;
     }
 

@@ -51,13 +51,14 @@
 #define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
 #include <VBox/vmm/pdmdev.h>
-#ifndef IN_RING3
-# include <VBox/vmm/pdmapi.h>
-#endif
 #include <VBox/AssertGuest.h>
 #include <VBox/version.h>
 #include <iprt/assert.h>
 #include <iprt/mem.h>
+
+#ifndef IN_RING3
+#error "R3-only driver"
+#endif
 
 #if RT_OPSYS == RT_OPSYS_LINUX
 #include "midialsa.h"

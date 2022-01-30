@@ -89,14 +89,17 @@ $(OUTDIR)/ExtPack.xml: ExtPack.xml
 $(OUTDIR)/ExtPack.signature:
 	echo "todo" > $@
 
-$(OUTDIR)/ExtPack.manifest: $(OUTDIR)
+$(OUTDIR)/ExtPack.manifest: $(OUTDIR) $(OUTOSDIR)
 	cd $(OUTDIR) ;\
 	find -type f -printf '%P\n' | xargs ../build_manifest.sh > $(@F)
 
 pack: $(OUTDIR)/ExtPack.xml $(OUTDIR)/ExtPack.signature $(OUTDIR)/ExtPack.manifest
 	tar --format=ustar --numeric-owner --owner=0 --group=0 --mode='a=rX,u+w' --sort=name -C $(OUTDIR) -f VMusic.vbox-extpack -v -z -c .
 
+strip:
+	strip $(OUTOSDIR)/*.$(SO)
+
 clean:
 	rm -rf $(OUTDIR) $(OBJDIR) VMusic.vbox-extpack
 	
-.PHONY: all build clean pack
+.PHONY: all build clean strip pack

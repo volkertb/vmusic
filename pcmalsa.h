@@ -27,11 +27,11 @@ typedef struct _snd_pcm snd_pcm_t;
 class PCMOutAlsa
 {
 public:
-	PCMOutAlsa();
-	~PCMOutAlsa();
+    PCMOutAlsa();
+    ~PCMOutAlsa();
 
     int open(const char *dev, unsigned int sampleRate, unsigned int channels);
-	int close();
+    int close();
 
     ssize_t avail();
     int wait();
@@ -42,7 +42,7 @@ private:
     int setParams(unsigned int sampleRate, unsigned int channels, unsigned int bufferTime, unsigned int periodTime);
 
 private:
-	snd_pcm_t * _pcm;
+    snd_pcm_t * _pcm;
     size_t _bufferSize;
     size_t _periodSize;
 };

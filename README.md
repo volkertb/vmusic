@@ -49,7 +49,7 @@ VBoxManage setextradata "$vm" VBoxInternal/Devices/mpu401/0/Trusted 1
 If the devices have been correctly enabled, you should see the following messages in the
 VBox.log file of a virtual machine after it has been powered on:
 
-```
+```{ use_pygments=false }
 00:00:00.799849 Installed Extension Packs:
 00:00:00.799866   VMusic (Version: 0.2 r0; VRDE Module: )
 ...
@@ -77,7 +77,7 @@ or [Munt](https://sourceforge.net/projects/munt/).
 First, start the virtual machine. Second, start and configure your software synthesizer.
 
 If you run `aconnect -l` at this point, you will see a list of all your real/virtual MIDI devices in the system. Sample output from  `aconnect -l`:
-```
+```{ use_pygments=false }
 client 0: 'System' [type=kernel]
     0 'Timer           '
 	Connecting To: 142:0
@@ -94,7 +94,7 @@ This indicates that there is a `Munt MT-32` synthesizer at port 129:0 , and a `V
 The latter is the virtual MIDI device used by the MPU-401 emulation. So, to send the virtual machine's MIDI output to Munt,
 connect the two ports by running:
 
-```
+```{ use_pygments=false }
 aconnect 128:0 129:0
 ```
 
@@ -105,16 +105,16 @@ all virtual MIDI ports to it, in which case you may not need to connect anything
 
 # Building
 
-You need the standard C++ building tools, _make_, _libasound_ and headers (e.g. `libasound2-dev` in Ubuntu).
+You need the standard C++ building tools, make, libasound and headers (e.g. `libasound2-dev` in Ubuntu).
 
 First, ensure that, in the directory where the VMusic source resides, you add two extra directories:
 
-* _VirtualBox.src_ containing the unpacked pristine VirtualBox source from [virtualbox.org](https://www.virtualbox.org/wiki/Downloads), e.g. the contents of [VirtualBox-6.1.32.tar.bz2](https://download.virtualbox.org/virtualbox/6.1.32/VirtualBox-6.1.32.tar.bz2).
+* `VirtualBox.src` containing the unpacked pristine VirtualBox source from [virtualbox.org](https://www.virtualbox.org/wiki/Downloads), e.g. the contents of [VirtualBox-6.1.32.tar.bz2](https://download.virtualbox.org/virtualbox/6.1.32/VirtualBox-6.1.32.tar.bz2).
 
-* _VirtualBox.linux.amd64_ containing at least the following VirtualBox Linux.amd64 libraries,
-either from an official installation or your distribution's package: _VBoxRT.so_ and _VBoxVMM.so_. 
-E.g. copy _/usr/lib/virtualbox/VBoxRT.so_ into _VirtualBox.linux.amd64/VBoxRT.so_.
+* `VirtualBox.linux.amd64` containing at least the following VirtualBox Linux.amd64 libraries,
+either from an official installation or your distribution's package: `VBoxRT.so` and `VBoxVMM.so`.
+E.g. copy `/usr/lib/virtualbox/VBoxRT.so` into `VirtualBox.linux.amd64/VBoxRT.so`.
 
-After this, just type `make` followed by `make pack` and _VMusic.vbox-extpack_ should be generated.
+After this, just type `make` followed by `make pack` and `VMusic.vbox-extpack` should be generated.
 
 

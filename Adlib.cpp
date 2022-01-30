@@ -51,15 +51,16 @@
 #define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
 #include <VBox/vmm/pdmdev.h>
-#ifndef IN_RING3
-# include <VBox/vmm/pdmapi.h>
-#endif
 #include <VBox/AssertGuest.h>
 #include <VBox/version.h>
 #include <iprt/assert.h>
 #include <iprt/mem.h>
 
 #include "opl3.h"
+
+#ifndef IN_RING3
+#error "R3-only driver"
+#endif
 
 #if RT_OPSYS == RT_OPSYS_LINUX
 #include "pcmalsa.h"
@@ -77,7 +78,7 @@ typedef PCMOutWin PCMOutBackend;
 
 #define ADLIB_DEFAULT_OUT_DEVICE    "default"
 #define ADLIB_DEFAULT_SAMPLE_RATE   22055 /* Hz */
-#define ADLIB_NUM_CHANNELS          2 /* as we are actually using OPL3 */
+#define ADLIB_NUM_CHANNELS          2 /* as we are actually supporting OPL3 */
 
 enum {
     ADLIB_PORT_ADDR = 0,
@@ -90,8 +91,11 @@ enum {
 /** The saved state version. */
 #define ADLIB_SAVED_STATE_VERSION     1
 
+/** Maximum number of sound samples render in one batch by render thread. */
+#define ADLIB_RENDER_BLOCK_TIME     5 /* in millisec */
+
 /** The render thread will shutdown if this time passes since the last OPL register write. */
-#define ADLIB_RENDER_THREAD_TIMEOUT 5000 /* in millisec */
+#define ADLIB_RENDER_SUSPEND_TIMEOUT 5000 /* in millisec */
 
 #define OPL2_NUM_IO_PORTS       2
 #define OPL3_NUM_IO_PORTS       4
@@ -126,9 +130,8 @@ typedef struct {
     PCMOutBackend          pcmOut;
     /** Thread that connects to PCM out, renders and pushes audio data. */
     RTTHREAD               hRenderThread;
-    /** Buffer for the rendering thread to use. */
+    /** Buffer for the rendering thread to use, size defined by ADLIB_RENDER_BLOCK_TIME. */
     R3PTRTYPE(uint8_t *)   pbRenderBuf;
-    size_t                 uRenderBufSize;
     /** Flag to signal render thread to shut down. */
     bool volatile          fShutdown;
     /** Flag from render thread indicated it has shutdown (e.g. due to error or timeout). */
@@ -156,6 +159,18 @@ typedef ADLIBSTATE *PADLIBSTATE;
 
 #ifndef VBOX_DEVICE_STRUCT_TESTCASE
 
+static inline uint64_t adlibCalculateFramesFromMilli(PADLIBSTATE pThis, uint64_t milli)
+{
+    uint64_t rate = pThis->uSampleRate;
+    return (rate * milli) / 1000;
+}
+
+static inline size_t adlibCalculateBytesFromFrames(PADLIBSTATE pThis, uint64_t frames)
+{
+    NOREF(pThis);
+    return frames * sizeof(uint16_t) * ADLIB_NUM_CHANNELS;
+}
+
 static uint64_t adlibCalculateTimerExpire(PPDMDEVINS pDevIns, uint8_t value, uint64_t period)
 {
     uint64_t delay_usec = (0x100 - value) * period;
@@ -168,6 +183,12 @@ static uint64_t adlibCalculateTimerExpire(PPDMDEVINS pDevIns, uint8_t value, uin
 }
 
 /**
+ * The render thread calls into the emulator to render audio frames, and then pushes them
+ * on the PCM output device.
+ * We rely on the PCM output device's blocking writes behavior to avoid running continously.
+ * A small block size (ADLIB_RENDER_BLOCK_TIME) is also used to give the main thread some
+ * opportunities to run.
+ *
  * @callback_method_impl{FNRTTHREAD}
  */
 static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
@@ -178,52 +199,37 @@ static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
 
     // Compute the max number of frames we can store on our temporary buffer.
     int16_t *buf = (int16_t*) pThis->pbRenderBuf;
-    ssize_t buf_size = pThis->uRenderBufSize;
-    ssize_t buf_samples = buf_size / sizeof(int16_t);
-    ssize_t buf_frames = buf_samples / ADLIB_NUM_CHANNELS;
+    uint64_t buf_frames = adlibCalculateFramesFromMilli(pThis, ADLIB_RENDER_BLOCK_TIME);
 
-    Log(("adlib: Starting render thread\n"));
+    Log(("adlib: Starting render thread with buf_frames=%lld\n", buf_frames));
 
     int rc = pPcmOut->open(pThis->pszOutDevice, pThis->uSampleRate, ADLIB_NUM_CHANNELS);
     AssertLogRelRCReturn(rc, rc);
 
     while (!ASMAtomicReadBool(&pThis->fShutdown)
-           && ASMAtomicReadU64(&pThis->tmLastWrite) + ADLIB_RENDER_THREAD_TIMEOUT >= RTTimeSystemMilliTS()) {
-        ssize_t avail = pPcmOut->avail();
-
-        if (avail < 0) {
-            LogWarn(("adlib: render thread avail err=%d\n", avail));
-            break;
-        }
-        if (avail == 0) {
-            rc = pPcmOut->wait();
-            AssertLogRelRCBreak(rc);
-            avail = pPcmOut->avail();
-            if (avail < 0) {
-                LogWarn(("adlib: render thread wait avail err=%d\n", avail));
-                break;
-            }
-        }
-
-        avail = RT_MIN(avail, buf_frames);
-
-        Log3(("rendering %ld frames\n", avail));
+           && ASMAtomicReadU64(&pThis->tmLastWrite) + ADLIB_RENDER_SUSPEND_TIMEOUT >= RTTimeSystemMilliTS()) {
+        Log3(("rendering %lld frames\n", buf_frames));
 
         RTCritSectEnter(&pThis->critSect);
-        OPL3_GenerateStream(&pThis->opl, buf, avail);
+        OPL3_GenerateStream(&pThis->opl, buf, buf_frames);
         RTCritSectLeave(&pThis->critSect);
 
-        ssize_t written_frames = pPcmOut->write(buf, avail);
+        Log3(("writing %lld frames\n", buf_frames));
+
+        ssize_t written_frames = pPcmOut->write(buf, buf_frames);
         if (written_frames < 0) {
-            LogWarn(("adlib: render thread write err=%d\n", written_frames));
-            break;
+            rc = written_frames;
+            AssertLogRelMsgFailedBreak(("adlib: render thread write err=%Rrc\n", written_frames));
         }
+
+        RTThreadYield();
     }
 
-    rc = pPcmOut->close();
-    AssertLogRelRC(rc);
+    int rcClose = pPcmOut->close();
+    AssertLogRelRC(rcClose);
+    if (RT_SUCCESS(rc)) rc = rcClose;
 
-    Log(("adlib: Stopping render thread\n"));
+    Log(("adlib: Stopping render thread with rc=%Rrc\n", rc));
 
     ASMAtomicWriteBool(&pThis->fStopped, true);
 
@@ -231,7 +237,7 @@ static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
 }
 
 /** Waits for the render thread to finish and reaps it. */
-static int adlibReapRenderThread(PPDMDEVINS pDevIns, RTMSINTERVAL millies = 1000)
+static int adlibReapRenderThread(PPDMDEVINS pDevIns, RTMSINTERVAL millies = 100)
 {
     PADLIBSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
 
@@ -253,6 +259,12 @@ static int adlibStopRenderThread(PPDMDEVINS pDevIns, bool wait = false)
 {
     PADLIBSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
 
+    if (pThis->hRenderThread == NIL_RTTHREAD) {
+        // Already stopped & reaped
+        return VINF_SUCCESS;
+    }
+
+    // Raise the flag for the thread
     ASMAtomicWriteBool(&pThis->fShutdown, true);
 
     if (wait) {
@@ -263,36 +275,19 @@ static int adlibStopRenderThread(PPDMDEVINS pDevIns, bool wait = false)
     return VINF_SUCCESS;
 }
 
-static int adlibResetRenderThread(PPDMDEVINS pDevIns)
-{
-    PADLIBSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
-
-    // Thread has to be shutdown
-    AssertReturn(ASMAtomicReadBool(&pThis->fShutdown), VERR_INVALID_STATE);
-
-    int rc = adlibReapRenderThread(pDevIns);
-    if (RT_SUCCESS(rc)) {
-        pThis->fShutdown = false;
-        pThis->fStopped = false;
-    } else {
-        LogWarn(("adlib%d: can't reset render thread, it did not terminate (%Rrc)\n", rc));
-    }
-
-    return rc;
-}
-
 static void adlibWakeRenderThread(PPDMDEVINS pDevIns)
 {
     PADLIBSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
 
     ASMAtomicWriteU64(&pThis->tmLastWrite, RTTimeSystemMilliTS());
 
-    AssertReturnVoid(!ASMAtomicReadBool(&pThis->fShutdown));
-
     // Reap any existing render thread if it had stopped
     if (ASMAtomicReadBool(&pThis->fStopped)) {
         int rc = adlibReapRenderThread(pDevIns);
-        AssertRCReturnVoid(rc);
+        AssertLogRelRCReturnVoid(rc);
+    } else if (ASMAtomicReadBool(&pThis->fShutdown)
+               && pThis->hRenderThread != NIL_RTTHREAD) {
+        AssertLogRelMsgFailedReturnVoid(("can't wake render thread -- it's shutting down!\n"));
     }
 
     // If there is no existing render thread, start a new one
@@ -305,10 +300,7 @@ static void adlibWakeRenderThread(PPDMDEVINS pDevIns)
         int rc = RTThreadCreateF(&pThis->hRenderThread, adlibRenderThread, pThis, 0,
                                  RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE,
                                  "adlib%u_render", pDevIns->iInstance);
-        if (RT_FAILURE(rc)) {
-            LogWarn(("adlib%d: could not start render thread (%Rrc)\n", pDevIns->iInstance, rc));
-            AssertRCReturnVoid(rc);
-        }
+        AssertLogRelRCReturnVoid(rc);
     }
 }
 
@@ -333,6 +325,10 @@ static uint8_t adlibReadStatus(PPDMDEVINS pDevIns)
     }
     if (pThis->timer2Enable && tmNow > pThis->timer2Expire) {
         status |= RT_BIT(7) | RT_BIT(5);
+    }
+    if (!pThis->fOPL3) {
+        // OPL2 seems to have this as special signature.
+        status |= 0x6;
     }
 
     Log2Func(("status=0x%x\n", status));
@@ -553,14 +549,6 @@ static DECLCALLBACK(void) adlibR3Suspend(PPDMDEVINS pDevIns)
 }
 
 /**
- * @interface_method_impl{PDMDEVREG,pfnResume}
- */
-static DECLCALLBACK(void) adlibR3Resume(PPDMDEVINS pDevIns)
-{
-    adlibResetRenderThread(pDevIns);
-}
-
-/**
  * @interface_method_impl{PDMDEVREG,pfnPowerOff}
  */
 static DECLCALLBACK(void) adlibR3PowerOff(PPDMDEVINS pDevIns)
@@ -611,18 +599,17 @@ static DECLCALLBACK(int) adlibR3Construct(PPDMDEVINS pDevIns, int iInstance, PCF
     adlibR3Reset(pDevIns);
 
     /* Initialize now the buffer that will be used by the render thread. */
-    // Give it as much space as it could possibly need, like half a second
-    pThis->uRenderBufSize = (pThis->uSampleRate * ADLIB_NUM_CHANNELS * sizeof(uint16_t)) / 2;
-    pThis->pbRenderBuf = (uint8_t *) RTMemAllocZ(pThis->uRenderBufSize);
+    size_t renderBlockSize = adlibCalculateBytesFromFrames(pThis, adlibCalculateFramesFromMilli(pThis, ADLIB_RENDER_BLOCK_TIME));
+    pThis->pbRenderBuf = (uint8_t *) RTMemAlloc(renderBlockSize);
     AssertReturn(pThis->pbRenderBuf, VERR_NO_MEMORY);
 
     /* Prepare the render thread, but not create it yet. */
-	pThis->fShutdown = false;
+    pThis->fShutdown = false;
     pThis->fStopped = false;
     pThis->hRenderThread = NIL_RTTHREAD;
     pThis->tmLastWrite = 0;
-	rc = RTCritSectInit(&pThis->critSect);
-	AssertRCReturn(rc, rc);
+    rc = RTCritSectInit(&pThis->critSect);
+    AssertRCReturn(rc, rc);
 
     /*
      * Register I/O ports.
@@ -716,7 +703,7 @@ static const PDMDEVREG g_DeviceAdlib =
     /* .pfnPowerOn = */             NULL,
     /* .pfnReset = */               adlibR3Reset,
     /* .pfnSuspend = */             adlibR3Suspend,
-    /* .pfnResume = */              adlibR3Resume,
+    /* .pfnResume = */              NULL,
     /* .pfnAttach = */              NULL,
     /* .pfnDetach = */              NULL,
     /* .pfnQueryInterface = */      NULL,

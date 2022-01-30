@@ -36,7 +36,7 @@ MIDIOutAlsa::~MIDIOutAlsa()
 
 int MIDIOutAlsa::open(const char *dev)
 {
-	int err;
+    int err;
 
     if ((err = snd_rawmidi_open(NULL, &_out, "virtual", SND_RAWMIDI_NONBLOCK))) {
         LogWarn(("ALSA rawmidi open error: %s\n", snd_strerror(err)));
@@ -46,7 +46,7 @@ int MIDIOutAlsa::open(const char *dev)
     // TODO: Connect somewhere
     NOREF(dev);
 
-	return VINF_SUCCESS;
+    return VINF_SUCCESS;
 }
 
 int MIDIOutAlsa::close()
@@ -55,7 +55,7 @@ int MIDIOutAlsa::close()
         snd_rawmidi_close(_out);
         _out = NULL;
     }
-	return VINF_SUCCESS;
+    return VINF_SUCCESS;
 }
 
 ssize_t MIDIOutAlsa::write(uint8_t *data, size_t len)
