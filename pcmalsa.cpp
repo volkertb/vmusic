@@ -128,42 +128,42 @@ int PCMOutAlsa::setParams(unsigned int sampleRate, unsigned int channels, unsign
     /* choose all parameters */
     err = snd_pcm_hw_params_any(_pcm, hwparams);
     if (err < 0) {
-        LogWarnFunc(("Broken PCM configuration: no configurations available: %s", snd_strerror(err)));
+        LogWarnFunc(("Broken PCM configuration: no configurations available: %s\n", snd_strerror(err)));
         return err;
     }
     /* set software resampling */
     err = snd_pcm_hw_params_set_rate_resample(_pcm, hwparams, 1);
     if (err < 0) {
-        LogWarnFunc(("Resampling setup failed: %s", snd_strerror(err)));
+        LogWarnFunc(("Resampling setup failed: %s\n", snd_strerror(err)));
         return err;
     }
     /* set the selected read/write format */
     err = snd_pcm_hw_params_set_access(_pcm, hwparams, SND_PCM_ACCESS_RW_INTERLEAVED);
     if (err < 0) {
-        LogWarnFunc(("Access type not available: %s", snd_strerror(err)));
+        LogWarnFunc(("Access type not available: %s\n", snd_strerror(err)));
         return err;
     }
     /* set the sample format */
     err = snd_pcm_hw_params_set_format(_pcm, hwparams, SND_PCM_FORMAT_S16);
     if (err < 0) {
-        LogWarnFunc(("Sample format not available: %s", snd_strerror(err)));
+        LogWarnFunc(("Sample format not available: %s\n", snd_strerror(err)));
         return err;
     }
     /* set the count of channels */
     err = snd_pcm_hw_params_set_channels(_pcm, hwparams, channels);
     if (err < 0) {
-        LogWarnFunc(("Channels count (%i) not available: %s", channels, snd_strerror(err)));
+        LogWarnFunc(("Channels count (%i) not available: %s\n", channels, snd_strerror(err)));
         return err;
     }
     /* set the stream rate */
     unsigned int rrate = sampleRate;
     err = snd_pcm_hw_params_set_rate_near(_pcm, hwparams, &rrate, 0);
     if (err < 0) {
-        LogWarnFunc(("Rate %iHz not available for playback: %s", sampleRate, snd_strerror(err)));
+        LogWarnFunc(("Rate %iHz not available for playback: %s\n", sampleRate, snd_strerror(err)));
         return err;
     }
     if (rrate != sampleRate) {
-        LogWarnFunc(("Rate doesn't match (requested %iHz, get %iHz)", sampleRate, rrate));
+        LogWarnFunc(("Rate doesn't match (requested %iHz, get %iHz)\n", sampleRate, rrate));
         return -EINVAL;
     }
 
@@ -194,35 +194,35 @@ int PCMOutAlsa::setParams(unsigned int sampleRate, unsigned int channels, unsign
     /* write the parameters to device */
     err = snd_pcm_hw_params(_pcm, hwparams);
     if (err < 0) {
-        LogWarnFunc(("Unable to set hw params: %s", snd_strerror(err)));
+        LogWarnFunc(("Unable to set hw params: %s\n", snd_strerror(err)));
         return err;
     }
 
-    LogFunc(("Using bufferSize=%lu periodSize=%lu\n", _bufferSize, _periodSize));
+    Log2Func(("using bufferSize=%lu periodSize=%lu\n", _bufferSize, _periodSize));
 
     /* get the current swparams */
     err = snd_pcm_sw_params_current(_pcm, swparams);
     if (err < 0) {
-        LogWarnFunc(("Unable to determine current swparams: %s", snd_strerror(err)));
+        LogWarnFunc(("Unable to determine current swparams: %s\n", snd_strerror(err)));
         return err;
     }
     /* start the transfer when the buffer is almost full: */
     /* (buffer_size / avail_min) * avail_min */
     err = snd_pcm_sw_params_set_start_threshold(_pcm, swparams, (_bufferSize / _periodSize) * _periodSize);
     if (err < 0) {
-        LogWarnFunc(("Unable to set start threshold mode: %s", snd_strerror(err)));
+        LogWarnFunc(("Unable to set start threshold mode: %s\n", snd_strerror(err)));
         return err;
     }
     /* allow the transfer when at least period_size samples can be processed */
     err = snd_pcm_sw_params_set_avail_min(_pcm, swparams, _periodSize);
     if (err < 0) {
-        LogWarnFunc(("Unable to set avail min: %s", snd_strerror(err)));
+        LogWarnFunc(("Unable to set avail min: %s\n", snd_strerror(err)));
         return err;
     }
     /* write the parameters to the playback device */
     err = snd_pcm_sw_params(_pcm, swparams);
     if (err < 0) {
-        LogWarnFunc(("Unable to set sw params: %s", snd_strerror(err)));
+        LogWarnFunc(("Unable to set sw params: %s\n", snd_strerror(err)));
         return err;
     }
 

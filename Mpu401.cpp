@@ -50,6 +50,9 @@
 #define LOG_ENABLED 1
 #define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
+    // Log level 3 is used for commands, responses, etc.
+    // Log level 5 is used for MIDI data in/out
+    // Log level 7 is used for all port in/out
 #include <VBox/vmm/pdmdev.h>
 #include <VBox/AssertGuest.h>
 #include <VBox/version.h>
@@ -120,6 +123,12 @@ static void mpuReset(PPDMDEVINS pDevIns)
 {
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
+    pThis->midi.reset();
+
+    if (pThis->fModeUart) {
+        Log(("Leaving UART mode"));
+    }
+
     pThis->fModeUart = false;
     pThis->fHaveInput = false;
     pThis->uInput = 0;
@@ -128,6 +137,8 @@ static void mpuReset(PPDMDEVINS pDevIns)
 static void mpuRespondData(PPDMDEVINS pDevIns, uint8_t data)
 {
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
+
+    Log3Func(("enqueing response=0x%x\n", data));
 
     pThis->fHaveInput = true;
     pThis->uInput = data;
@@ -145,8 +156,8 @@ static uint8_t mpuReadData(PPDMDEVINS pDevIns)
     if (pThis->fModeUart) {
         uint8_t data;
         ssize_t read = pThis->midi.read(&data, 1);
-        Log3Func(("read = %lld\n", read));
         if (read == 1) {
+            Log5Func(("midi_in data=0x%x\n", data));
             return data;
         }
     }
@@ -162,7 +173,9 @@ static void mpuWriteData(PPDMDEVINS pDevIns, uint8_t data)
 
     if (pThis->fModeUart) {
         ssize_t written = pThis->midi.write(&data, 1);
-        Log3Func(("written = %lld\n", written));
+        if (written == 1) {
+            Log5Func(("midi_out data=0x%x\n", data));
+        }
     } else {
         LogWarnFunc(("Ignoring data, not in UART mode\n"));
     }
@@ -197,7 +210,7 @@ static uint8_t mpuReadStatus(PPDMDEVINS pDevIns)
         status |= RT_BIT(7);
     }
 
-    LogFlow(("mpu status: outputReady=%RTbool inputReady=%RTbool\n", outputReady, inputReady));
+    Log5(("mpu status: outputReady=%RTbool inputReady=%RTbool\n", outputReady, inputReady));
 
     return status;
 }
@@ -206,6 +219,8 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
 {
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
+    Log3Func(("cmd = 0x%x\n", cmd));
+
     if (pThis->fModeUart) {
         switch (cmd) {
             case MPU_COMMAND_RESET:
@@ -213,7 +228,7 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
             default:
-                LogWarnFunc(("Unknown command in UART mode: 0x%hx", cmd));
+                LogWarnFunc(("Unknown command in UART mode: 0x%hx\n", cmd));
                 break;
         }
     } else {
@@ -224,12 +239,13 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
             case MPU_COMMAND_ENTER_UART:
-                Log(("Entering UART mode"));
+                Log(("Entering UART mode\n"));
                 pThis->fModeUart = true;
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
             default:
-                LogWarnFunc(("Unknown command in normal mode: 0x%hx", cmd));
+                LogWarnFunc(("Unknown command in normal mode: 0x%hx\n", cmd));
+                mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
         }
     }
@@ -261,7 +277,7 @@ static DECLCALLBACK(VBOXSTRICTRC) mpuIoPortRead(PPDMDEVINS pDevIns, void *pvUser
                 break;
         }
 
-        LogFunc(("read port %u: %#04x\n", offPort, uValue));
+        Log7Func(("read port %u: %#04x\n", offPort, uValue));
 
         *pu32 = uValue;
         return VINF_SUCCESS;
@@ -278,7 +294,7 @@ static DECLCALLBACK(VBOXSTRICTRC) mpuIoPortWrite(PPDMDEVINS pDevIns, void *pvUse
     RT_NOREF(pvUser);
     if (cb == 1)
     {
-        LogFunc(("write port %u: %#04x\n", offPort, u32));
+        Log7Func(("write port %u: %#04x\n", offPort, u32));
 
         switch (offPort)
         {
@@ -361,7 +377,7 @@ static DECLCALLBACK(int) mpuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
     if (RT_FAILURE(rc))
         return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"Port\" from the config"));
 
-    Log(("mpu401#%i: Configuring on port 0x%x\n", iInstance, pThis->uPort));
+    LogFlowFunc(("mpu401#%i: port 0x%x\n", iInstance, pThis->uPort));
 
     /*
      * Initialize the device state.

@@ -33,14 +33,14 @@ static ssize_t rawmidi_avail(snd_rawmidi_t *rmidi)
 
     int nfds = snd_rawmidi_poll_descriptors(rmidi, pfds, MAX_POLL_FDS);
     if (nfds <= 0) {
-        LogWarn(("ALSA rawmidi avail: no descriptors to poll!"));
+        LogWarn(("ALSA rawmidi avail: no descriptors to poll!\n"));
         return VERR_AUDIO_ENUMERATION_FAILED;
     }
 
     int ready = poll(pfds, nfds, 0);
     if (ready < 0) {
         if (errno != EAGAIN && errno != EINTR) {
-            LogWarnFunc(("Cannot poll, errno=%d", errno));
+            LogWarnFunc(("Cannot poll, errno=%d\n", errno));
             return VERR_AUDIO_STREAM_NOT_READY;
         }
         return 0;
@@ -50,15 +50,15 @@ static ssize_t rawmidi_avail(snd_rawmidi_t *rmidi)
         unsigned short revents;
         int err = snd_rawmidi_poll_descriptors_revents(rmidi, pfds, nfds, &revents);
         if (err != 0) {
-            LogWarnFunc(("Cannot call revents, err=%d", err));
+            LogWarnFunc(("Cannot call revents, err=%d\n", err));
             return VERR_AUDIO_STREAM_NOT_READY;
         }
 
         if (revents & POLLNVAL) {
-            LogWarnFunc(("POLLNVAL"));
+            LogWarnFunc(("POLLNVAL\n"));
         }
         if (revents & POLLERR) {
-            LogWarnFunc(("POLLERR"));
+            LogWarnFunc(("POLLERR\n"));
         }
 
         return revents & (POLLIN | POLLOUT);
@@ -112,7 +112,7 @@ ssize_t MIDIAlsa::write(uint8_t *data, size_t len)
 {
     ssize_t result = snd_rawmidi_write(_out, data, len);
     if (result < 0) {
-        LogWarn(("ALSA midi write error: %s", snd_strerror(result)));
+        LogWarn(("ALSA midi write error: %s\n", snd_strerror(result)));
         return VERR_AUDIO_STREAM_NOT_READY;
     }
     return result;
@@ -125,10 +125,21 @@ ssize_t MIDIAlsa::readAvail()
 
 ssize_t MIDIAlsa::read(uint8_t *buf, size_t len)
 {
-    ssize_t result = snd_rawmidi_read(_out, buf, len);
+    ssize_t result = snd_rawmidi_read(_in, buf, len);
     if (result < 0) {
-        LogWarn(("ALSA midi read error: %s", snd_strerror(result)));
+        LogWarn(("ALSA midi read error: %s\n", snd_strerror(result)));
         return VERR_AUDIO_STREAM_NOT_READY;
     }
     return result;
+}
+
+int MIDIAlsa::reset()
+{
+    if (_in) {
+        snd_rawmidi_drop(_in);
+    }
+    if (_out) {
+        snd_rawmidi_drop(_out);
+    }
+    return VINF_SUCCESS;
 }

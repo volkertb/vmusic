@@ -50,6 +50,9 @@
 #define LOG_ENABLED 1
 #define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
+    // Log level 3 is used for register reads/writes
+    // Log level 7 is used for all port in/out
+    // Log level 9 is used for PCM rendering
 #include <VBox/vmm/pdmdev.h>
 #include <VBox/AssertGuest.h>
 #include <VBox/version.h>
@@ -178,7 +181,6 @@ static uint64_t adlibCalculateTimerExpire(PPDMDEVINS pDevIns, uint8_t value, uin
     uint64_t freq = PDMDevHlpTMTimeVirtGetFreq(pDevIns);
     uint64_t delay_ticks = (delay_usec * freq) / 1000000UL /*1usec in hz*/;
     uint64_t now_ticks = PDMDevHlpTMTimeVirtGet(pDevIns);
-    Log3Func(("value=%02x delay_usec=%llu virtfreq=%llu now_ticks=%llu delay_ticks=%llu\n", value, delay_usec, freq, now_ticks, delay_ticks));
     return now_ticks + delay_ticks;
 }
 
@@ -208,13 +210,13 @@ static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
 
     while (!ASMAtomicReadBool(&pThis->fShutdown)
            && ASMAtomicReadU64(&pThis->tmLastWrite) + ADLIB_RENDER_SUSPEND_TIMEOUT >= RTTimeSystemMilliTS()) {
-        Log3(("rendering %lld frames\n", buf_frames));
+        Log9(("rendering %lld frames\n", buf_frames));
 
         RTCritSectEnter(&pThis->critSect);
         OPL3_GenerateStream(&pThis->opl, buf, buf_frames);
         RTCritSectLeave(&pThis->critSect);
 
-        Log3(("writing %lld frames\n", buf_frames));
+        Log9(("writing %lld frames\n", buf_frames));
 
         ssize_t written_frames = pPcmOut->write(buf, buf_frames);
         if (written_frames < 0) {
@@ -295,7 +297,7 @@ static void adlibWakeRenderThread(PPDMDEVINS pDevIns)
         pThis->fShutdown = false;
         pThis->fStopped = false;
 
-        Log2(("Creating render thread\n"));
+        Log3(("Creating render thread\n"));
 
         int rc = RTThreadCreateF(&pThis->hRenderThread, adlibRenderThread, pThis, 0,
                                  RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE,
@@ -316,7 +318,7 @@ static uint8_t adlibReadStatus(PPDMDEVINS pDevIns)
 
     uint64_t tmNow = PDMDevHlpTMTimeVirtGet(pDevIns);
 
-    Log3Func(("tmNow=%llu timer1=%llu timer2=%llu\n", tmNow,
+    Log5Func(("tmNow=%llu timer1=%llu timer2=%llu\n", tmNow,
               pThis->timer1Enable ? pThis->timer1Expire : 0,
               pThis->timer2Enable ? pThis->timer2Expire : 0));
 
@@ -331,7 +333,7 @@ static uint8_t adlibReadStatus(PPDMDEVINS pDevIns)
         status |= 0x6;
     }
 
-    Log2Func(("status=0x%x\n", status));
+    Log3Func(("status=0x%x\n", status));
 
     return status;
 }
@@ -343,7 +345,7 @@ static void adlibWriteRegister(PPDMDEVINS pDevIns, uint16_t reg, uint8_t value)
     // Any write to a register causes the render thread to be waken up
     adlibWakeRenderThread(pDevIns);
 
-    Log2Func(("0x%x = 0x%x\n", reg, value));
+    Log3Func(("0x%x = 0x%x\n", reg, value));
 
     switch (reg)
     {
@@ -433,7 +435,7 @@ static DECLCALLBACK(VBOXSTRICTRC) adlibIoPortRead(PPDMDEVINS pDevIns, void *pvUs
                 break;
         }
 
-        Log3Func(("read port %u: %#04x\n", offPort, uValue));
+        Log7Func(("read port %u: %#04x\n", offPort, uValue));
 
         *pu32 = uValue;
         return VINF_SUCCESS;
@@ -451,7 +453,7 @@ static DECLCALLBACK(VBOXSTRICTRC) adlibIoPortWrite(PPDMDEVINS pDevIns, void *pvU
     if (cb == 1)
     {
         PADLIBSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
-        Log3Func(("write port %u: %#04x\n", offPort, u32));
+        Log7Func(("write port %u: %#04x\n", offPort, u32));
 
         uint8_t val = u32;
 

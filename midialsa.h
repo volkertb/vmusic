@@ -39,6 +39,8 @@ public:
     ssize_t readAvail();
     ssize_t read(uint8_t *buf, size_t len);
 
+    int reset();
+
 private:
     snd_rawmidi_t *_in;
     snd_rawmidi_t *_out;
