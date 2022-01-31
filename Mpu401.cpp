@@ -153,7 +153,7 @@ static uint8_t mpuReadData(PPDMDEVINS pDevIns)
         return pThis->uInput;
     }
 
-    if (pThis->fModeUart) {
+    if (pThis->fModeUart && pThis->midi.readAvail() >= 1) {
         uint8_t data;
         ssize_t read = pThis->midi.read(&data, 1);
         if (read == 1) {
@@ -162,7 +162,7 @@ static uint8_t mpuReadData(PPDMDEVINS pDevIns)
         }
     }
 
-    LogWarnFunc(("Trying to read, but no data to read\n"));
+    Log3Func(("Trying to read, but no data to read\n"));
 
     return MPU_RESPONSE_ACK;
 }
@@ -177,7 +177,7 @@ static void mpuWriteData(PPDMDEVINS pDevIns, uint8_t data)
             Log5Func(("midi_out data=0x%x\n", data));
         }
     } else {
-        LogWarnFunc(("Ignoring data, not in UART mode\n"));
+        Log3Func(("Ignoring data, not in UART mode\n"));
     }
 }
 
