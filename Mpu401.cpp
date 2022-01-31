@@ -321,15 +321,14 @@ static DECLCALLBACK(VBOXSTRICTRC) mpuIoPortWrite(PPDMDEVINS pDevIns, void *pvUse
 /**
  * @callback_method_impl{FNSSMDEVSAVEEXEC}
  */
-static DECLCALLBACK(int) mpuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHandle)
+static DECLCALLBACK(int) mpuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM)
 {
     PMPUSTATE       pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
     PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
 
-    // TODO
-    NOREF(pThis);
-    NOREF(pHlp);
-    NOREF(pSSMHandle);
+    pHlp->pfnSSMPutBool(pSSM, pThis->fHaveInput);
+    pHlp->pfnSSMPutU8  (pSSM, pThis->uInput);
+    pHlp->pfnSSMPutBool(pSSM, pThis->fModeUart);
 
 	return 0;
 }
@@ -337,7 +336,7 @@ static DECLCALLBACK(int) mpuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHandle
 /**
  * @callback_method_impl{FNSSMDEVLOADEXEC}
  */
-static DECLCALLBACK(int) mpuR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHandle, uint32_t uVersion, uint32_t uPass)
+static DECLCALLBACK(int) mpuR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM, uint32_t uVersion, uint32_t uPass)
 {
     PMPUSTATE       pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
     PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
@@ -345,10 +344,9 @@ static DECLCALLBACK(int) mpuR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHandle
     Assert(uPass == SSM_PASS_FINAL);
     NOREF(uPass);
 
-    // TODO
-    NOREF(pThis);
-    NOREF(pHlp);
-    NOREF(pSSMHandle);
+    pHlp->pfnSSMGetBool(pSSM, &pThis->fHaveInput);
+    pHlp->pfnSSMGetU8  (pSSM, &pThis->uInput);
+    pHlp->pfnSSMGetBool(pSSM, &pThis->fModeUart);
 
     if (uVersion > MPU_SAVED_STATE_VERSION)
         return VERR_SSM_UNSUPPORTED_DATA_UNIT_VERSION;

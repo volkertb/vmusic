@@ -485,15 +485,24 @@ static DECLCALLBACK(VBOXSTRICTRC) adlibIoPortWrite(PPDMDEVINS pDevIns, void *pvU
 /**
  * @callback_method_impl{FNSSMDEVSAVEEXEC}
  */
-static DECLCALLBACK(int) adlibR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHandle)
+static DECLCALLBACK(int) adlibR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM)
 {
     PADLIBSTATE     pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
     PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
 
-    // TODO
-    NOREF(pThis);
-    NOREF(pHlp);
-    NOREF(pSSMHandle);
+    // Don't care if the configuration changes after resume, so not saving it
+
+    // However save as much of the current state as possible
+    pHlp->pfnSSMPutU16   (pSSM, pThis->oplReg);
+
+    // TODO: We should save a copy of all current registers
+
+    pHlp->pfnSSMPutU8    (pSSM, pThis->timer1Value);
+    pHlp->pfnSSMPutU8    (pSSM, pThis->timer2Value);
+    pHlp->pfnSSMPutU64   (pSSM, pThis->timer1Expire);
+    pHlp->pfnSSMPutU64   (pSSM, pThis->timer2Expire);
+    pHlp->pfnSSMPutBool  (pSSM, pThis->timer1Enable);
+    pHlp->pfnSSMPutBool  (pSSM, pThis->timer2Enable);
 
 	return 0;
 }
@@ -501,7 +510,7 @@ static DECLCALLBACK(int) adlibR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHand
 /**
  * @callback_method_impl{FNSSMDEVLOADEXEC}
  */
-static DECLCALLBACK(int) adlibR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHandle, uint32_t uVersion, uint32_t uPass)
+static DECLCALLBACK(int) adlibR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM, uint32_t uVersion, uint32_t uPass)
 {
     PADLIBSTATE     pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
     PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
@@ -509,10 +518,16 @@ static DECLCALLBACK(int) adlibR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSMHand
     Assert(uPass == SSM_PASS_FINAL);
     NOREF(uPass);
 
-    // TODO
-    NOREF(pThis);
-    NOREF(pHlp);
-    NOREF(pSSMHandle);
+    pHlp->pfnSSMGetU16   (pSSM, &pThis->oplReg);
+
+    pHlp->pfnSSMGetU8    (pSSM, &pThis->timer1Value);
+    pHlp->pfnSSMGetU8    (pSSM, &pThis->timer2Value);
+    pHlp->pfnSSMGetU64   (pSSM, &pThis->timer1Expire);
+    pHlp->pfnSSMGetU64   (pSSM, &pThis->timer2Expire);
+    pHlp->pfnSSMGetBool  (pSSM, &pThis->timer1Enable);
+    pHlp->pfnSSMGetBool  (pSSM, &pThis->timer2Enable);
+
+    pThis->tmLastWrite = RTTimeSystemMilliTS();
 
     if (uVersion > ADLIB_SAVED_STATE_VERSION)
         return VERR_SSM_UNSUPPORTED_DATA_UNIT_VERSION;
