@@ -3,14 +3,14 @@
 **VMusic** is an extension pack for [VirtualBox](https://www.virtualbox.org), containing
 some virtual devices for common music hardware:
 
-* An "Adlib" device emulating an OPL2/OPL3 using the [Nuked OPL3 emulator](https://github.com/nukeykt/Nuked-OPL3).
+* An `adlib` device emulating an OPL2/OPL3 using the [Nuked OPL3 emulator](https://github.com/nukeykt/Nuked-OPL3).
 By default this device is configured on the standard Adlib Gold ports, 0x388-0x38B, but can also be configured
 to listen simultaneously on a second set of ports in order to provide some Sound Blaster Pro/SB FM compatibility
 (e.g. 0x220-0x223).
 The generated audio is sent directly via ALSA to the default PCM output device (usually PulseAudio), ignoring 
 VirtualBox settings.
 
-* An "Mpu401" device emulating a MPU-401 "compatible" dumb/UART-only, on the MPU-401 ports 0x330-0x331. 
+* A `mpu401` device emulating a MPU-401 "compatible" dumb/UART-only, on the usual ports 0x330-0x331.
 This allows the guest to output MIDI data to the host. The raw MIDI data is sent to a "Virtual RawMIDI" ALSA device
 which can be connected with either a real MIDI device or a synthesizer such as [FluidSynth](https://www.fluidsynth.org/)
 or [Munt](https://sourceforge.net/projects/munt/).
@@ -25,11 +25,15 @@ emulation, albeit is also not necessary. You can enable each device independentl
 Note that "SB MIDI" support is not implemented; for MIDI out you can only use the Mpu401 device. Most Sound Blaster
 drivers post-SB16 use the Mpu401 device.
 
+![Screenshot of VirtualBox playing The Secret of Monkey Island while connected to the Munt MT-32 Emulator](http://depot.javispedro.com/vbox/VirtualBoxMunt.png)
+
 # Installing
 
-Use the .vbox-extpack file,
+You can try using the [VMusic.vbox-extpack](http://depot.javispedro.com/vbox/VMusic-0.2-vbox6.1.30.vbox-extpack)
+I built for VirtualBox 6.1.30,
 which you can install into VirtualBox through the VirtualBox Preferences -> Extension Packs GUI,
 or by running `VBoxManage extpack install VMusic.vbox-extpack`.
+This should work at least for most other recent versions in the 6.1.x series.
 
 # Using
 
@@ -58,14 +62,14 @@ VBox.log file of a virtual machine after it has been powered on:
 00:00:00.920825 mpu401#0: Configured on port 0x330-0x331
 ```
 
-## Connecting Adlib
+### Connecting Adlib
 
 You do not need to do anything else to hear the emulated audio.
 It will be automatically sent to the default ALSA PCM out device,
 ignoring your preferred output device set in the VirtualBox GUI.
 There is currently no way to change that.
 
-## Connecting MPU-401
+### Connecting MPU-401
 
 Even after you power on a virtual machine using the MPU-401 device, you still need to connect 
 the output from the virtual machine with either a real MIDI out device or a software synthesizer,
