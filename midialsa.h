@@ -19,8 +19,7 @@
 #ifndef VMUSIC_MIDIALSA_H
 #define VMUSIC_MIDIALSA_H
 
-#include <stddef.h>
-#include <stdint.h>
+#include <iprt/types.h>
 
 typedef struct _snd_rawmidi snd_rawmidi_t;
 
@@ -30,20 +29,24 @@ public:
     MIDIAlsa();
     ~MIDIAlsa();
 
+    /** dev has no effect right now. */
     int open(const char *dev);
 	int close();
 
-    ssize_t writeAvail();
+    /** reset device, dropping all buffers, but keep open */
+    int reset();
+
+    int poll(uint32_t events, uint32_t *revents, RTMSINTERVAL millies);
+    int pollInterrupt();
+
     ssize_t write(uint8_t *data, size_t len);
 
-    ssize_t readAvail();
     ssize_t read(uint8_t *buf, size_t len);
-
-    int reset();
 
 private:
     snd_rawmidi_t *_in;
     snd_rawmidi_t *_out;
+    int _eventfd;
 };
 
 #endif

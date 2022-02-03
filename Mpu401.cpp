@@ -58,6 +58,8 @@
 #include <VBox/version.h>
 #include <iprt/assert.h>
 #include <iprt/mem.h>
+#include <iprt/poll.h>
+#include <iprt/circbuf.h>
 
 #ifndef IN_RING3
 #error "R3-only driver"
@@ -76,7 +78,9 @@ typedef MIDIWin MIDIBackend;
 *********************************************************************************************************************************/
 
 #define MPU_DEFAULT_IO_BASE         0x330
+#define MPU_DEFAULT_IRQ             -1 /* disabled */
 #define MPU_IO_SIZE                 2
+#define MPU_CIRC_BUFFER_SIZE        16
 
 enum {
     MPU_PORT_DATA = 0,
@@ -101,70 +105,163 @@ typedef struct {
     /* Device configuration. */
     /** Base port. */
     RTIOPORT               uPort;
+    /** IRQ */
+    int8_t                 uIrq;
 
     /* Current state. */
-    /** Whether we have an input/result byte waiting to be read. */
-    bool                   fHaveInput;
-    /** Current input byte waiting to be read. */
-    uint8_t                uInput;
-    /** True if UART mode, false if regular/intelligent mode. */
-    bool                   fModeUart;
     /** MIDI backend. */
     MIDIBackend            midi;
+    /** True if UART mode, false if regular/intelligent mode. */
+    bool                   fModeUart;
+    /** Buffer used for sending UART data. */
+    R3PTRTYPE(PRTCIRCBUF)   pTxBuf;
+    /** Buffer used for receiving UART data / command responses. */
+    R3PTRTYPE(PRTCIRCBUF)   pRxBuf;
+
+    /** Thread which does actual RX/TX. */
+    PPDMTHREAD             pIoThread;
 
     IOMIOPORTHANDLE        hIoPorts;
+
 } MPUSTATE;
 /** Pointer to the shared device state.  */
 typedef MPUSTATE *PMPUSTATE;
 
 #ifndef VBOX_DEVICE_STRUCT_TESTCASE
 
+static void mpuLowerIrq(PPDMDEVINS pDevIns)
+{
+    PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
+
+    if (pThis->uIrq >= 0) {
+        Log7Func(("irq=%RTbool\n", false));
+        PDMDevHlpISASetIrqNoWait(pDevIns, pThis->uIrq, PDM_IRQ_LEVEL_LOW);
+    }
+}
+
+static void mpuUpdateIrq(PPDMDEVINS pDevIns)
+{
+    PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
+
+    // This function may be called from the IO thread, too.
+
+    if (pThis->uIrq >= 0) {
+        bool raise = RTCircBufUsed(pThis->pRxBuf) > 0;
+        Log7Func(("irq=%RTbool\n", raise));
+        PDMDevHlpISASetIrqNoWait(pDevIns, pThis->uIrq, raise ? PDM_IRQ_LEVEL_HIGH : PDM_IRQ_LEVEL_LOW);
+    }
+}
+
+static void mpuWakeIoThread(PPDMDEVINS pDevIns)
+{
+    PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
+    Log7(("wake io thread\n"));
+    int rc = pThis->midi.pollInterrupt();
+    AssertLogRelRC(rc);
+}
+
 static void mpuReset(PPDMDEVINS pDevIns)
 {
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
-    pThis->midi.reset();
-
     if (pThis->fModeUart) {
-        Log(("Leaving UART mode"));
+        Log(("Leaving UART mode\n"));
     }
 
     pThis->fModeUart = false;
-    pThis->fHaveInput = false;
-    pThis->uInput = 0;
+
+    if (pThis->pIoThread) {
+        int rc = PDMDevHlpThreadSuspend(pDevIns, pThis->pIoThread);
+        AssertLogRelRC(rc);
+    }
+
+    mpuLowerIrq(pDevIns);
+
+    RTCircBufReset(pThis->pTxBuf);
+    RTCircBufReset(pThis->pRxBuf);
+
+    pThis->midi.reset();
+
+    mpuUpdateIrq(pDevIns);
+
+    if (pThis->pIoThread) {
+        int rc = PDMDevHlpThreadResume(pDevIns, pThis->pIoThread);
+        AssertLogRelRC(rc);
+    }
+}
+
+static void mpuEnterUart(PPDMDEVINS pDevIns)
+{
+    PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
+
+    if (pThis->fModeUart) {
+        Log2(("Already in UART mode\n"));
+        return;
+    }
+
+    Log(("Entering UART mode\n"));
+
+    pThis->fModeUart = true;
+
+    // IO thread needs to wakeup and start polling
+    mpuWakeIoThread(pDevIns);
 }
 
 static void mpuRespondData(PPDMDEVINS pDevIns, uint8_t data)
 {
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
+    // In UART mode we should not be generating system responses
+    // which are going to corrupt the MIDI stream.
+    AssertLogRelReturnVoid(!pThis->fModeUart);
+    // Also the RxBuf CIRCBUF does not support multiple concurrent writers anyway,
+    // and in UART mode the IoThread could be writing to it
+
     Log3Func(("enqueing response=0x%x\n", data));
 
-    pThis->fHaveInput = true;
-    pThis->uInput = data;
+    uint8_t *buf;
+    size_t bufSize;
+    RTCircBufAcquireWriteBlock(pThis->pRxBuf, 1, (void**)&buf, &bufSize);
+    if (bufSize < 1) {
+        LogWarnFunc(("overflow in MIDI RX buffer\n"));
+        return;
+    }
+
+    *buf = data;
+    RTCircBufReleaseWriteBlock(pThis->pRxBuf, 1);
+
+    mpuUpdateIrq(pDevIns);
 }
 
 static uint8_t mpuReadData(PPDMDEVINS pDevIns)
 {
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
+    uint8_t ret = 0xff;
 
-    if (pThis->fHaveInput) {
-        pThis->fHaveInput = false;
-        return pThis->uInput;
-    }
+    // Always lower IRQ after a port read, even if there is still more data left
+    mpuLowerIrq(pDevIns);
 
-    if (pThis->fModeUart && pThis->midi.readAvail() >= 1) {
-        uint8_t data;
-        ssize_t read = pThis->midi.read(&data, 1);
-        if (read == 1) {
-            Log5Func(("midi_in data=0x%x\n", data));
-            return data;
+    uint8_t *buf;
+    size_t bufSize;
+    RTCircBufAcquireReadBlock(pThis->pRxBuf, 1, (void**)&buf, &bufSize);
+    if (bufSize > 0) {
+        ret = *buf;
+        RTCircBufReleaseReadBlock(pThis->pRxBuf, 1);
+
+        Log5Func(("midi_in data=0x%x\n", ret));
+
+        // Raise the IRQ again if we have more data to read
+        mpuUpdateIrq(pDevIns);
+
+        if (pThis->fModeUart) {
+            // Also ensure we wake the IO thread to poll for more data
+            mpuWakeIoThread(pDevIns);
         }
+    } else {
+        Log3Func(("Trying to read, but no data to read, returning 0x%x\n", ret));
     }
 
-    Log3Func(("Trying to read, but no data to read\n"));
-
-    return MPU_RESPONSE_ACK;
+    return ret;
 }
 
 static void mpuWriteData(PPDMDEVINS pDevIns, uint8_t data)
@@ -172,9 +269,18 @@ static void mpuWriteData(PPDMDEVINS pDevIns, uint8_t data)
     PMPUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
     if (pThis->fModeUart) {
-        ssize_t written = pThis->midi.write(&data, 1);
-        if (written == 1) {
+        uint8_t *buf;
+        size_t bufSize;
+        RTCircBufAcquireWriteBlock(pThis->pTxBuf, 1, (void**)&buf, &bufSize);
+        if (bufSize > 0) {
+            *buf = data;
+            RTCircBufReleaseWriteBlock(pThis->pTxBuf, 1);
+
             Log5Func(("midi_out data=0x%x\n", data));
+
+            mpuWakeIoThread(pDevIns); // So that it has a chance to send the data
+        } else {
+            LogWarnFunc(("Overflow in MIDI TX buffer\n"));
         }
     } else {
         Log3Func(("Ignoring data, not in UART mode\n"));
@@ -199,18 +305,20 @@ static uint8_t mpuReadStatus(PPDMDEVINS pDevIns)
 
     uint8_t status = 0;
 
-    bool outputReady = !pThis->fModeUart || pThis->midi.writeAvail() >= 1;
-    if (!outputReady) {
+    Log7Func(("tx buf=%zu/%zu rx buf=%zu/%zu\n",
+              RTCircBufUsed(pThis->pTxBuf), RTCircBufFree(pThis->pTxBuf),
+              RTCircBufUsed(pThis->pRxBuf), RTCircBufFree(pThis->pRxBuf)));
+
+    if (RTCircBufFree(pThis->pTxBuf) == 0) {
         status |= RT_BIT(6);
     }
 
-    bool inputReady = pThis->fHaveInput
-            || (pThis->fModeUart && pThis->midi.readAvail() >= 1);
-    if (!inputReady) {
+    if (RTCircBufUsed(pThis->pRxBuf) == 0) {
         status |= RT_BIT(7);
     }
 
-    Log5(("mpu status: outputReady=%RTbool inputReady=%RTbool\n", outputReady, inputReady));
+    Log7(("mpu status: output=%RTbool input=%RTbool\n",
+          !(status & RT_BIT(6)), !(status & RT_BIT(7))));
 
     return status;
 }
@@ -225,7 +333,11 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
         switch (cmd) {
             case MPU_COMMAND_RESET:
                 mpuReset(pDevIns);
-                mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
+                /* "An ACK will not be sent back upon sending a SYSTEM RESET to
+                 * leave the UART MODE ($3F)". */
+                break;
+            case MPU_COMMAND_ENTER_UART:
+                // Nothing to do?
                 break;
             default:
                 LogWarnFunc(("Unknown command in UART mode: 0x%hx\n", cmd));
@@ -239,9 +351,8 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
                 break;
             case MPU_COMMAND_ENTER_UART:
-                Log(("Entering UART mode\n"));
-                pThis->fModeUart = true;
                 mpuRespondData(pDevIns, MPU_RESPONSE_ACK);
+                mpuEnterUart(pDevIns);
                 break;
             default:
                 LogWarnFunc(("Unknown command in normal mode: 0x%hx\n", cmd));
@@ -249,6 +360,97 @@ static void mpuDoCommand(PPDMDEVINS pDevIns, uint8_t cmd)
                 break;
         }
     }
+}
+
+/**
+ * @callback_method_impl{PFNPDMTHREADDEV}
+ */
+static DECLCALLBACK(int) mpuIoThreadLoop(PPDMDEVINS pDevIns, PPDMTHREAD pThread)
+{
+    RT_NOREF(pDevIns);
+    PMPUSTATE pThis = (PMPUSTATE)pThread->pvUser;
+
+    if (pThread->enmState == PDMTHREADSTATE_INITIALIZING)
+        return VINF_SUCCESS;
+
+    LogFlowFuncEnter();
+
+    while (pThread->enmState == PDMTHREADSTATE_RUNNING)
+    {
+        uint32_t events = 0, revents = 0;
+
+        if (pThis->fModeUart) {
+            if (RTCircBufUsed(pThis->pTxBuf) > 0) {
+                events |= RTPOLL_EVT_WRITE;
+            }
+            if (RTCircBufFree(pThis->pRxBuf) > 0) {
+                events |= RTPOLL_EVT_READ;
+            }
+        }
+
+        Log7Func(("polling for write=%RTbool read=%RTbool\n",
+                  bool(events & RTPOLL_EVT_WRITE), bool(events & RTPOLL_EVT_READ)));
+
+        int rc = pThis->midi.poll(events, &revents, RT_INDEFINITE_WAIT);
+        if (RT_SUCCESS(rc)) {
+            if (revents & RTPOLL_EVT_WRITE) {
+                // Write data from the Tx Buf
+                uint8_t *buf;
+                size_t bufSize = RTCircBufUsed(pThis->pTxBuf);
+                if (bufSize > 0) {
+                    ssize_t written = 0;
+                    RTCircBufAcquireReadBlock(pThis->pTxBuf, bufSize, (void**)&buf, &bufSize);
+                    if (bufSize > 0) {
+                        Log7Func(("writing %zu bytes\n", bufSize));
+                        written = pThis->midi.write(buf, bufSize);
+                        if (written < 0) {
+                            LogWarn(("write failed with %Rrc\n", written));
+                            written = 0;
+                        }
+                    }
+                    RTCircBufReleaseReadBlock(pThis->pTxBuf, written);
+                }
+            }
+            if (revents & RTPOLL_EVT_READ) {
+                // Read data into the Rx Buf
+                uint8_t *buf;
+                size_t bufSize = RTCircBufFree(pThis->pRxBuf);
+                if (bufSize > 0) {
+                    ssize_t read = 0;
+                    RTCircBufAcquireWriteBlock(pThis->pRxBuf, bufSize, (void**)&buf, &bufSize);
+                    if (bufSize > 0) {
+                        Log7Func(("reading %zu bytes\n", bufSize));
+                        read = pThis->midi.read(buf, bufSize);
+                        if (read < 0) {
+                            LogWarnFunc(("read failed with %Rrc\n", read));
+                            read = 0;
+                        }
+                    }
+                    RTCircBufReleaseWriteBlock(pThis->pRxBuf, read);
+                    if (read > 0) {
+                        mpuUpdateIrq(pDevIns);
+                    }
+                }
+            }
+        } else {
+            LogWarnFunc(("poll failed with %Rrc", rc));
+        }
+    }
+
+    LogFlowFuncLeave();
+
+    return VINF_SUCCESS;
+}
+
+/**
+ * @callback_method_impl{PFNPDMTHREADWAKEUPDEV}
+ */
+static DECLCALLBACK(int) mpuIoThreadWakeup(PPDMDEVINS pDevIns, PPDMTHREAD pThread)
+{
+    PMPUSTATE pThis = (PMPUSTATE)pThread->pvUser;
+
+    RT_NOREF(pDevIns);
+    return pThis->midi.pollInterrupt();
 }
 
 /**
@@ -326,8 +528,8 @@ static DECLCALLBACK(int) mpuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM)
     PMPUSTATE       pThis = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
     PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
 
-    pHlp->pfnSSMPutBool(pSSM, pThis->fHaveInput);
-    pHlp->pfnSSMPutU8  (pSSM, pThis->uInput);
+    AssertLogRel(pThis->pIoThread->enmState != PDMTHREADSTATE_RUNNING);
+
     pHlp->pfnSSMPutBool(pSSM, pThis->fModeUart);
 
 	return 0;
@@ -344,8 +546,8 @@ static DECLCALLBACK(int) mpuR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM, uint
     Assert(uPass == SSM_PASS_FINAL);
     NOREF(uPass);
 
-    pHlp->pfnSSMGetBool(pSSM, &pThis->fHaveInput);
-    pHlp->pfnSSMGetU8  (pSSM, &pThis->uInput);
+    AssertLogRel(pThis->pIoThread->enmState != PDMTHREADSTATE_RUNNING);
+
     pHlp->pfnSSMGetBool(pSSM, &pThis->fModeUart);
 
     if (uVersion > MPU_SAVED_STATE_VERSION)
@@ -366,25 +568,29 @@ static DECLCALLBACK(int) mpuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
 
     Assert(iInstance == 0);
 
-    /*
-     * Validate and read the configuration.
-     */
-    PDMDEV_VALIDATE_CONFIG_RETURN(pDevIns, "Port", "");
+    // Validate and read the configuration.
+    PDMDEV_VALIDATE_CONFIG_RETURN(pDevIns, "Port|IRQ", "");
 
     rc = pHlp->pfnCFGMQueryPortDef(pCfg, "Port", &pThis->uPort, MPU_DEFAULT_IO_BASE);
     if (RT_FAILURE(rc))
         return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"Port\" from the config"));
 
-    LogFlowFunc(("mpu401#%i: port 0x%x\n", iInstance, pThis->uPort));
+    rc = pHlp->pfnCFGMQueryS8Def(pCfg, "IRQ", &pThis->uIrq, MPU_DEFAULT_IRQ);
+    if (RT_FAILURE(rc))
+        return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"IRQ\" from the config"));
 
-    /*
-     * Initialize the device state.
-     */
+    LogFlowFunc(("mpu401#%i: port 0x%x irq %d\n", iInstance, pThis->uPort, pThis->uIrq));
+
+    // Create buffers
+    rc = RTCircBufCreate(&pThis->pTxBuf, MPU_CIRC_BUFFER_SIZE);
+    AssertRCReturn(rc, rc);
+    rc = RTCircBufCreate(&pThis->pRxBuf, MPU_CIRC_BUFFER_SIZE);
+    AssertRCReturn(rc, rc);
+
+    // Initialize the device state.
     mpuReset(pDevIns);
 
-    /*
-     * Register I/O ports.
-     */
+    // Register I/O ports
     static const IOMIOPORTDESC s_aDescs[] =
     {
         { "Data", "Data", NULL, NULL }, // base + 00h
@@ -395,17 +601,23 @@ static DECLCALLBACK(int) mpuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
                                      "MPU-401", s_aDescs, &pThis->hIoPorts);
     AssertRCReturn(rc, rc);
 
-    /*
-     * Register saved state.
-     */
+    // Register saved state
     rc = PDMDevHlpSSMRegister(pDevIns, MPU_SAVED_STATE_VERSION, sizeof(*pThis), mpuR3SaveExec, mpuR3LoadExec);
     AssertRCReturn(rc, rc);
 
-    /* Open the MIDI device now. */
+    // Open the MIDI device now, before we create the IO thread which may poll it.
     rc = pThis->midi.open("default");
     AssertRCReturn(rc, rc);
 
+    // Create the IO thread; note that this starts it...
+    rc = PDMDevHlpThreadCreate(pDevIns, &pThis->pIoThread, pThis, mpuIoThreadLoop,
+                               mpuIoThreadWakeup, 0, RTTHREADTYPE_IO, "MpuIo");
+    AssertRCReturn(rc, rc);
+
     LogRel(("mpu401#%i: Configured on port 0x%x-0x%x\n", iInstance, pThis->uPort, pThis->uPort + MPU_IO_SIZE - 1));
+    if (pThis->uIrq >= 0) {
+        LogRel(("mpu401#%i: Using IRQ %d\n", iInstance, pThis->uIrq));
+    }
 
     return VINF_SUCCESS;
 }
@@ -417,8 +629,19 @@ static DECLCALLBACK(int) mpuR3Destruct(PPDMDEVINS pDevIns)
 {
     PMPUSTATE     pThis   = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
 
+    if (pThis->pIoThread) {
+        int rc, rcThread;
+        rc = PDMDevHlpThreadDestroy(pDevIns, pThis->pIoThread, &rcThread);
+        AssertLogRelRC(rc);
+        pThis->pIoThread = NULL;
+    }
+
     int rc = pThis->midi.close();
-    AssertRCReturn(rc, rc);
+    AssertLogRelRC(rc);
+
+    RTCircBufDestroy(pThis->pTxBuf);
+    RTCircBufDestroy(pThis->pRxBuf);
+
 
     return VINF_SUCCESS;
 }
@@ -432,17 +655,6 @@ static DECLCALLBACK(int) mpuR3Destruct(PPDMDEVINS pDevIns)
 static DECLCALLBACK(void) mpuR3Reset(PPDMDEVINS pDevIns)
 {
     mpuReset(pDevIns);
-}
-
-/**
- * @interface_method_impl{PDMDEVREG,pfnPowerOff}
- */
-static DECLCALLBACK(void) mpuR3PowerOff(PPDMDEVINS pDevIns)
-{
-    PMPUSTATE     pThis   = PDMDEVINS_2_DATA(pDevIns, PMPUSTATE);
-
-    int rc = pThis->midi.close();
-    AssertRC(rc);
 }
 
 # endif /* !IN_RING3 */
@@ -481,7 +693,7 @@ static const PDMDEVREG g_DeviceMpu =
     /* .pfnDetach = */              NULL,
     /* .pfnQueryInterface = */      NULL,
     /* .pfnInitComplete = */        NULL,
-    /* .pfnPowerOff = */            mpuR3PowerOff,
+    /* .pfnPowerOff = */            NULL,
     /* .pfnSoftReset = */           NULL,
     /* .pfnReserved0 = */           NULL,
     /* .pfnReserved1 = */           NULL,
