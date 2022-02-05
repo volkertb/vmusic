@@ -13,14 +13,19 @@ OUTOSDIR:=$(OUTDIR)/$(OS).$(ARCH)
 
 # Files for each library
 ADLIBR3OBJ:=$(OBJOSDIR)/Adlib.o $(OBJOSDIR)/opl3.o 
-MPU401R3OBJ:=$(OBJOSDIR)/Mpu401.o
 ADLIBR3LIBS:=
+MPU401R3OBJ:=$(OBJOSDIR)/Mpu401.o
 MPU401R3LIBS:=
+EMU8000R3OBJ:=$(OBJOSDIR)/Emu8000.o $(OBJOSDIR)/emu8k.o 
+EMU8000R3LIBS:=
+
 ifeq "$(OS)" "linux"
 ADLIBR3OBJ+=$(OBJOSDIR)/pcmalsa.o
-MPU401R3OBJ+=$(OBJOSDIR)/midialsa.o
 ADLIBR3LIBS+=-lasound
+MPU401R3OBJ+=$(OBJOSDIR)/midialsa.o
 MPU401R3LIBS+=-lasound
+EMU8000R3OBJ+=$(OBJOSDIR)/pcmalsa.o
+EMU8000R3LIBS+=-lasound
 else ifeq "$(OS)" "win"
 ADLIBR3OBJ+=$(OBJOSDIR)/pcmwin.o
 MPU401R3OBJ+=$(OBJOSDIR)/midiwin.o
@@ -60,14 +65,14 @@ endif
 
 all: build
 
-build: $(OUTOSDIR)/VMusicMain.$(SO) $(OUTOSDIR)/VMusicMainVM.$(SO) $(OUTOSDIR)/AdlibR3.$(SO) $(OUTOSDIR)/Mpu401R3.$(SO)
+build: $(OUTOSDIR)/VMusicMain.$(SO) $(OUTOSDIR)/VMusicMainVM.$(SO) $(OUTOSDIR)/AdlibR3.$(SO) $(OUTOSDIR)/Mpu401R3.$(SO) $(OUTOSDIR)/Emu8000R3.$(SO)
 
 $(OUTDIR) $(OBJDIR) $(OBJOSDIR) $(OUTOSDIR): %:
 	mkdir -p $@
 
 $(OBJOSDIR)/%.o: %.cpp | $(OBJOSDIR)
 	$(CXX) -c -O2 -g -pipe -fPIC -m64 $(VBOX_CXXFLAGS) $(VBOX_DEFINES) -o $@ $<
-	
+
 $(OBJOSDIR)/%.o: %.c | $(OBJOSDIR)
 	$(CC) -c -O2 -g -pipe -fPIC -m64 $(VBOX_CFLAGS) $(VBOX_DEFINES) -o $@ $<
 
@@ -83,9 +88,12 @@ $(OUTOSDIR)/AdlibR3.$(SO): $(ADLIBR3OBJ) | $(OUTOSDIR)
 $(OUTOSDIR)/Mpu401R3.$(SO): $(MPU401R3OBJ) | $(OUTOSDIR)
 	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(MPU401R3LIBS)
 
+$(OUTOSDIR)/Emu8000R3.$(SO): $(EMU8000R3OBJ) | $(OUTOSDIR)
+	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(EMU8000R3LIBS)
+
 $(OUTDIR)/ExtPack.xml: ExtPack.xml
 	install -m 0644 $< $@
-	
+
 $(OUTDIR)/ExtPack.signature:
 	echo "todo" > $@
 
@@ -101,5 +109,5 @@ strip:
 
 clean:
 	rm -rf $(OUTDIR) $(OBJDIR) VMusic.vbox-extpack
-	
+
 .PHONY: all build clean strip pack

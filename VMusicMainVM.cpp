@@ -91,6 +91,16 @@ static DECLCALLBACK(int)  vMusicExtPackVM_VMConfigureVMM(PCVBOXEXTPACKVMREG pThi
     rc = CFGMR3InsertString(pCfgMine, "Path", szPath);
     AssertRCReturn(rc, rc);
 
+    // Likewise for Emu8000 module
+    rc = g_pHlp->pfnFindModule(g_pHlp, "Emu8000R3", NULL, VBOXEXTPACKMODKIND_R3, szPath, sizeof(szPath), NULL);
+    if (RT_FAILURE(rc))
+        return rc;
+
+    rc = CFGMR3InsertNode(pCfgDevices, "Emu8000", &pCfgMine);
+    AssertRCReturn(rc, rc);
+    rc = CFGMR3InsertString(pCfgMine, "Path", szPath);
+    AssertRCReturn(rc, rc);
+
 
     return VINF_SUCCESS;
 }
