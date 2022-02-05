@@ -132,8 +132,11 @@ typedef struct {
     bool volatile          fShutdown;
     /** Flag from render thread indicated it has shutdown (e.g. due to error or timeout). */
     bool volatile          fStopped;
-    /** (System clock) timestamp of last OPL chip access. */
+    /** (System clock) timestamp of last port write. */
     uint64_t               tmLastWrite;
+
+    /** (Virtual clock) timestamp of last frame rendered. */
+    uint64_t               tmLastRender;
 
     /** To protect access to opl3_chip from the render thread and main thread. */
     RTCRITSECT             critSect;
@@ -148,17 +151,25 @@ typedef EMUSTATE *PEMUSTATE;
 
 #ifndef VBOX_DEVICE_STRUCT_TESTCASE
 
-static inline uint64_t emuCalculateFramesFromMilli(PEMUSTATE pThis, uint64_t milli)
+DECLINLINE(uint64_t) emuCalculateFramesFromMilli(PEMUSTATE pThis, uint64_t milli)
 {
     uint64_t rate = pThis->uSampleRate;
     return (rate * milli) / 1000;
 }
 
-static inline size_t emuCalculateBytesFromFrames(PEMUSTATE pThis, uint64_t frames)
+DECLINLINE(uint64_t) emuCalculateFramesFromNano(PEMUSTATE pThis, uint64_t nano)
+{
+    uint64_t rate = pThis->uSampleRate;
+    return (rate * nano) / 1000000000;
+}
+
+DECLINLINE(size_t) emuCalculateBytesFromFrames(PEMUSTATE pThis, uint64_t frames)
 {
     NOREF(pThis);
     return frames * sizeof(uint16_t) * EMU_NUM_CHANNELS;
 }
+
+
 
 /**
  * The render thread calls into the emulator to render audio frames, and then pushes them
@@ -172,7 +183,8 @@ static inline size_t emuCalculateBytesFromFrames(PEMUSTATE pThis, uint64_t frame
 static DECLCALLBACK(int) emuRenderThread(RTTHREAD ThreadSelf, void *pvUser)
 {
     RT_NOREF(ThreadSelf);
-    PEMUSTATE pThis = (PEMUSTATE)pvUser;
+    PPDMDEVINS pDevIns = (PPDMDEVINS)pvUser;
+    PEMUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
     PCMOutBackend *pPcmOut = &pThis->pcmOut;
 
     // Compute the max number of frames we can store on our temporary buffer.
@@ -190,6 +202,7 @@ static DECLCALLBACK(int) emuRenderThread(RTTHREAD ThreadSelf, void *pvUser)
 
         RTCritSectEnter(&pThis->critSect);
         emu8k_render(pThis->emu, buf, buf_frames);
+        pThis->tmLastRender = PDMDevHlpTMTimeVirtGetNano(pDevIns);
         RTCritSectLeave(&pThis->critSect);
 
         Log9(("writing %lld frames\n", buf_frames));
@@ -275,7 +288,7 @@ static void emuWakeRenderThread(PPDMDEVINS pDevIns)
 
         Log3(("Creating render thread\n"));
 
-        int rc = RTThreadCreateF(&pThis->hRenderThread, emuRenderThread, pThis, 0,
+        int rc = RTThreadCreateF(&pThis->hRenderThread, emuRenderThread, pDevIns, 0,
                                  RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE,
                                  "emu%u_render", pDevIns->iInstance);
         AssertLogRelRCReturnVoid(rc);
@@ -290,6 +303,10 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortRead(PPDMDEVINS pDevIns, void *pvUser
     RT_NOREF(pvUser);
 
     PEMUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
+
+    RTCritSectEnter(&pThis->critSect);
+    uint64_t frames_since_last_render = emuCalculateFramesFromNano(pThis, PDMDevHlpTMTimeVirtGetNano(pDevIns) - pThis->tmLastRender);
+    emu8k_update_virtual_sample_count(pThis->emu, frames_since_last_render);
 
     switch (cb) {
         case sizeof(uint8_t):
@@ -306,6 +323,8 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortRead(PPDMDEVINS pDevIns, void *pvUser
             *pu32 = 0xff;
             break;
     }
+
+    RTCritSectLeave(&pThis->critSect);
 
     Log9Func(("read port 0x%X (%u): %#04x\n", port, cb, *pu32));
 
@@ -397,6 +416,7 @@ static DECLCALLBACK(void) emuR3Reset(PPDMDEVINS pDevIns)
     
     RTCritSectEnter(&pThis->critSect);
     emu8k_reset(pThis->emu);
+    pThis->tmLastRender = PDMDevHlpTMTimeVirtGetNano(pDevIns);
     RTCritSectLeave(&pThis->critSect);
 }
 

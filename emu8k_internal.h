@@ -401,7 +401,8 @@ typedef struct emu8k_t
         uint32_t smalr, smarr, smalw, smarw;
         uint16_t smld_buffer, smrd_buffer;
 
-        uint16_t wc;
+        uint16_t sample_count;
+        uint16_t sample_count_virtual;
         
         uint16_t id;
 

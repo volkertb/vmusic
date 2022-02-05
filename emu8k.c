@@ -685,7 +685,7 @@ uint16_t emu8k_inw(emu8k_t *emu8k, uint16_t addr)
                                  it is used by programs to wait. Not critical, but should help reduce
                                  the amount of calls and wait time */
                         case 27: /*Sample Counter ( 44Khz clock) */
-                                return emu8k->wc;
+                                return emu8k->sample_count + emu8k->sample_count_virtual;
                         }
                         break;
 
@@ -753,9 +753,11 @@ uint16_t emu8k_inw(emu8k_t *emu8k, uint16_t addr)
 
 void emu8k_outw(emu8k_t *emu8k, uint16_t addr, uint16_t val)
 {
+#if 0
         /*TODO: I would like to not call this here, but i found it was needed or else cubic player would not finish opening (take a looot more of time than usual).
          * Basically, being here means that the audio is generated in the emulation thread, instead of the audio thread.*/
-        // TODO emu8k_update(emu8k);
+        emu8k_update(emu8k);
+#endif
 
 #ifdef EMU8K_DEBUG_REGISTERS
         if (addr == 0xE22)
@@ -2150,7 +2152,8 @@ I've recopilated these sentences to get an idea of how to loop
         }
 
         /* Update EMU clock. */
-        emu8k->wc += (new_pos - emu8k->pos);
+        emu8k->sample_count += (new_pos - emu8k->pos);
+        emu8k->sample_count_virtual = 0;
 
         emu8k->pos = new_pos;
 }
@@ -2388,29 +2391,32 @@ void emu8k_free(emu8k_t* emu8k)
 
 void emu8k_reset(emu8k_t* emu8k)
 {
-        /* NOTE! read_pos and buffer content is implicitly initialized to zero by the sb_t structure memset on sb_awe32_init() */
-        emu8k->reverb_engine.reflections[0].bufsize = 2 * REV_BUFSIZE_STEP;
-        emu8k->reverb_engine.reflections[1].bufsize = 4 * REV_BUFSIZE_STEP;
-        emu8k->reverb_engine.reflections[2].bufsize = 8 * REV_BUFSIZE_STEP;
-        emu8k->reverb_engine.reflections[3].bufsize = 13 * REV_BUFSIZE_STEP;
-        emu8k->reverb_engine.reflections[4].bufsize = 19 * REV_BUFSIZE_STEP;
-        emu8k->reverb_engine.reflections[5].bufsize = 26 * REV_BUFSIZE_STEP;
+    /* NOTE! read_pos and buffer content is implicitly initialized to zero by the sb_t structure memset on sb_awe32_init() */
+    emu8k->reverb_engine.reflections[0].bufsize = 2 * REV_BUFSIZE_STEP;
+    emu8k->reverb_engine.reflections[1].bufsize = 4 * REV_BUFSIZE_STEP;
+    emu8k->reverb_engine.reflections[2].bufsize = 8 * REV_BUFSIZE_STEP;
+    emu8k->reverb_engine.reflections[3].bufsize = 13 * REV_BUFSIZE_STEP;
+    emu8k->reverb_engine.reflections[4].bufsize = 19 * REV_BUFSIZE_STEP;
+    emu8k->reverb_engine.reflections[5].bufsize = 26 * REV_BUFSIZE_STEP;
 
-        /*This is a bit random.*/
-        for (int c = 0; c < 4; c++)
-        {
-                emu8k->reverb_engine.allpass[3 - c].feedback = 0.5;
-                emu8k->reverb_engine.allpass[3 - c].bufsize = (4 * c) * REV_BUFSIZE_STEP + 55;
-                emu8k->reverb_engine.allpass[7 - c].feedback = 0.5;
-                emu8k->reverb_engine.allpass[7 - c].bufsize = (4 * c) * REV_BUFSIZE_STEP + 55;
-        }
+    /*This is a bit random.*/
+    for (int c = 0; c < 4; c++)
+    {
+        emu8k->reverb_engine.allpass[3 - c].feedback = 0.5;
+        emu8k->reverb_engine.allpass[3 - c].bufsize = (4 * c) * REV_BUFSIZE_STEP + 55;
+        emu8k->reverb_engine.allpass[7 - c].feedback = 0.5;
+        emu8k->reverb_engine.allpass[7 - c].bufsize = (4 * c) * REV_BUFSIZE_STEP + 55;
+    }
 
-        /* Even when the documentation says that this has to be written by applications to initialize the card, 
+    /* Even when the documentation says that this has to be written by applications to initialize the card,
          * several applications and drivers ( aweman on windows, linux oss driver..) read it to detect an AWE card. */
-        emu8k->hwcf1 = 0x59;
-        emu8k->hwcf2 = 0x20;
-        /* Initial state is muted. 0x04 is unmuted. */
-        emu8k->hwcf3 = 0x00;
+    emu8k->hwcf1 = 0x59;
+    emu8k->hwcf2 = 0x20;
+    /* Initial state is muted. 0x04 is unmuted. */
+    emu8k->hwcf3 = 0x00;
+
+    emu8k->sample_count = 0;
+    emu8k->sample_count_virtual = 0;
 }
 
 void emu8k_render(emu8k_t *emu8k, int16_t *buf, size_t frames)
@@ -2424,4 +2430,9 @@ void emu8k_render(emu8k_t *emu8k, int16_t *buf, size_t frames)
     }
 
     emu8k->pos = 0;
+}
+
+void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint8_t sample_count)
+{
+    emu8k->sample_count_virtual = sample_count;
 }
