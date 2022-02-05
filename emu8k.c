@@ -2432,7 +2432,12 @@ void emu8k_render(emu8k_t *emu8k, int16_t *buf, size_t frames)
     emu8k->pos = 0;
 }
 
-void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint8_t sample_count)
+void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint16_t sample_count)
 {
+#if 0
+    if (sample_count > emu8k->sample_count_virtual + 1) {
+        Log5Func(("big vsc increment: %u : %u -> %u\n", sample_count - emu8k->sample_count_virtual, emu8k->sample_count_virtual, sample_count));
+    }
+#endif
     emu8k->sample_count_virtual = sample_count;
 }

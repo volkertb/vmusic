@@ -62,7 +62,7 @@ void emu8k_outb(emu8k_t *emu8k, uint16_t addr, uint8_t val);
 void emu8k_render(emu8k_t *emu8k, int16_t *buf, size_t frames);
 
 /** Between calls to emu8k_render, the virtual sample count is used to keep the "sample count" register ticking at a reasonable pace. */
-void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint8_t sample_count);
+void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint16_t sample_count);
 /*  Many programs seem to rely in this counter incrementing frequently, and may hang/error out if it doesn't.
  *  It is reset to 0 whenever we render and therefore increment the real sample count.
  *  This means that effectively the sample count register may readjust itself (go back or jump ahead) on _render :(. */

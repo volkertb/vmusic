@@ -84,7 +84,7 @@ typedef PCMOutWin PCMOutBackend;
 #define EMU_DEFAULT_SAMPLE_RATE     44100 /* Hz */
 #define EMU_NUM_CHANNELS            2
 
-#define EMU_DEFAULT_ONBOARD_RAM     0x7000U /* KiB */
+#define EMU_DEFAULT_ONBOARD_RAM     (8 * 1024) /* KiB */
 
 enum {
     EMU_PORT_DATA0    = 0,
