@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <VirtualBoxExtensionPack xmlns="http://www.virtualbox.org/VirtualBoxExtensionPack" version="1.0">
     <Name>VMusic</Name>
-    <Description>Adds virtual devices for common music hardware: Adlib card (OPL2/OPL3), and MPU-401 compatible (UART mode only).</Description>
-    <Version>0.2</Version>
+    <Description>Adds virtual devices for common music hardware: Adlib card (OPL2/OPL3), MPU-401 compatible (UART mode only), and SBAWE32 (EMU8000).</Description>
+    <Version>0.3</Version>
     <MainModule>VMusicMain</MainModule>
     <MainVMModule>VMusicMainVM</MainVMModule>
 </VirtualBoxExtensionPack>
