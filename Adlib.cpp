@@ -80,7 +80,7 @@ typedef PCMOutWin PCMOutBackend;
 #define ADLIB_DEFAULT_IO_BASE         0x388
 
 #define ADLIB_DEFAULT_OUT_DEVICE    "default"
-#define ADLIB_DEFAULT_SAMPLE_RATE   22055 /* Hz */
+#define ADLIB_DEFAULT_SAMPLE_RATE   22050 /* Hz */
 #define ADLIB_NUM_CHANNELS          2 /* as we are actually supporting OPL3 */
 
 enum {
