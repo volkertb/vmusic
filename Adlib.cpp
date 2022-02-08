@@ -143,7 +143,7 @@ typedef struct {
     uint64_t               tmLastWrite;
 
     /** To protect access to opl3_chip from the render thread and main thread. */
-    RTCRITSECT             critSect;
+    PDMCRITSECT            critSect;
     /** Handle to nuked. */
     opl3_chip              opl;
 
@@ -196,7 +196,8 @@ static uint64_t adlibCalculateTimerExpire(PPDMDEVINS pDevIns, uint8_t value, uin
 static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
 {
     RT_NOREF(ThreadSelf);
-    PADLIBSTATE pThis = (PADLIBSTATE)pvUser;
+    PPDMDEVINS pDevIns = (PPDMDEVINS)pvUser;
+    PADLIBSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
     PCMOutBackend *pPcmOut = &pThis->pcmOut;
 
     // Compute the max number of frames we can store on our temporary buffer.
@@ -212,9 +213,9 @@ static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
            && ASMAtomicReadU64(&pThis->tmLastWrite) + ADLIB_RENDER_SUSPEND_TIMEOUT >= RTTimeSystemMilliTS()) {
         Log9(("rendering %lld frames\n", buf_frames));
 
-        RTCritSectEnter(&pThis->critSect);
+        PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
         OPL3_GenerateStream(&pThis->opl, buf, buf_frames);
-        RTCritSectLeave(&pThis->critSect);
+        PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 
         Log9(("writing %lld frames\n", buf_frames));
 
@@ -299,7 +300,7 @@ static void adlibWakeRenderThread(PPDMDEVINS pDevIns)
 
         Log3(("Creating render thread\n"));
 
-        int rc = RTThreadCreateF(&pThis->hRenderThread, adlibRenderThread, pThis, 0,
+        int rc = RTThreadCreateF(&pThis->hRenderThread, adlibRenderThread, pDevIns, 0,
                                  RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE,
                                  "adlib%u_render", pDevIns->iInstance);
         AssertLogRelRCReturnVoid(rc);
@@ -407,9 +408,9 @@ static void adlibWriteRegister(PPDMDEVINS pDevIns, uint16_t reg, uint8_t value)
             break;
 
         default:
-            RTCritSectEnter(&pThis->critSect);
+            PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
             OPL3_WriteRegBuffered(&pThis->opl, reg, value);
-            RTCritSectLeave(&pThis->critSect);
+            PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
             break;
     }
 }
@@ -545,9 +546,9 @@ static DECLCALLBACK(void) adlibR3Reset(PPDMDEVINS pDevIns)
 {
     PADLIBSTATE   pThis   = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
     
-    RTCritSectEnter(&pThis->critSect);
+    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
     OPL3_Reset(&pThis->opl, pThis->uSampleRate);
-    RTCritSectLeave(&pThis->critSect);
+    PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 	pThis->oplReg = 0;
     pThis->timer1Enable = false;
     pThis->timer1Expire = 0;
@@ -610,27 +611,23 @@ static DECLCALLBACK(int) adlibR3Construct(PPDMDEVINS pDevIns, int iInstance, PCF
     if (RT_FAILURE(rc))
         return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"SampleRate\" from the config"));
 
-    /*
-     * Initialize the device state.
-     */
-    adlibR3Reset(pDevIns);
-
-    /* Initialize now the buffer that will be used by the render thread. */
-    size_t renderBlockSize = adlibCalculateBytesFromFrames(pThis, adlibCalculateFramesFromMilli(pThis, ADLIB_RENDER_BLOCK_TIME));
-    pThis->pbRenderBuf = (uint8_t *) RTMemAlloc(renderBlockSize);
-    AssertReturn(pThis->pbRenderBuf, VERR_NO_MEMORY);
-
-    /* Prepare the render thread, but not create it yet. */
+    // Prepare the render thread, but not create it yet.
     pThis->fShutdown = false;
     pThis->fStopped = false;
     pThis->hRenderThread = NIL_RTTHREAD;
     pThis->tmLastWrite = 0;
-    rc = RTCritSectInit(&pThis->critSect);
+    rc = PDMDevHlpCritSectInit(pDevIns, &pThis->critSect, RT_SRC_POS, "adlib#%d", iInstance);
     AssertRCReturn(rc, rc);
 
-    /*
-     * Register I/O ports.
-     */
+    // Initialize now the buffer that will be used by the render thread.
+    size_t renderBlockSize = adlibCalculateBytesFromFrames(pThis, adlibCalculateFramesFromMilli(pThis, ADLIB_RENDER_BLOCK_TIME));
+    pThis->pbRenderBuf = (uint8_t *) PDMDevHlpMMHeapAlloc(pDevIns, renderBlockSize);
+    AssertReturn(pThis->pbRenderBuf, VERR_NO_MEMORY);
+
+    // Initialize the device state.
+    adlibR3Reset(pDevIns);
+
+    // Register I/O ports.
     static const IOMIOPORTDESC s_aDescs[] =
     {
 	    { "Status", "Address", "Status register", "Primary index register" }, // base + 00h
@@ -652,15 +649,13 @@ static DECLCALLBACK(int) adlibR3Construct(PPDMDEVINS pDevIns, int iInstance, PCF
         pThis->hMirrorPorts = 0;
     }
 
-    /*
-     * Register saved state.
-     */
+    // Register saved state.
     rc = PDMDevHlpSSMRegister(pDevIns, ADLIB_SAVED_STATE_VERSION, sizeof(*pThis), adlibR3SaveExec, adlibR3LoadExec);
     AssertRCReturn(rc, rc);
 
-    LogRel(("adlib%i: Configured on ports 0x%x-0x%x\n", iInstance, pThis->uPort, pThis->uPort + numPorts - 1));
+    LogRel(("adlib#%i: Configured on ports 0x%x-0x%x\n", iInstance, pThis->uPort, pThis->uPort + numPorts - 1));
     if (pThis->uMirrorPort && pThis->hMirrorPorts) {
-        LogRel(("adlib%i: Mirrored on ports 0x%x-0x%x\n", iInstance, pThis->uMirrorPort, pThis->uMirrorPort + numPorts - 1));
+        LogRel(("adlib#%i: Mirrored on ports 0x%x-0x%x\n", iInstance, pThis->uMirrorPort, pThis->uMirrorPort + numPorts - 1));
     }
 
     return VINF_SUCCESS;
@@ -677,7 +672,7 @@ static DECLCALLBACK(int) adlibR3Destruct(PPDMDEVINS pDevIns)
     adlibStopRenderThread(pDevIns, true);
 
     if (pThis->pbRenderBuf) {
-        RTMemFree(pThis->pbRenderBuf);
+        PDMDevHlpMMHeapFree(pDevIns, pThis->pbRenderBuf);
         pThis->pbRenderBuf = NULL;
     }
 
@@ -685,6 +680,8 @@ static DECLCALLBACK(int) adlibR3Destruct(PPDMDEVINS pDevIns)
         PDMDevHlpMMHeapFree(pDevIns, pThis->pszOutDevice);
         pThis->pszOutDevice = NULL;
     }
+
+    PDMDevHlpCritSectDelete(pDevIns, &pThis->critSect);
 
     return VINF_SUCCESS;
 }
