@@ -43,9 +43,8 @@
 
 #define MAXSOUNDBUFLEN (48000 / 10)
 
-#define BLOCK_SIZE_WORDS 0x10000
-
 /* All these defines are in samples, not in bytes. */
+#define BLOCK_SIZE_WORDS 0x10000
 #define EMU8K_MEM_ADDRESS_MASK 0xFFFFFF
 #define EMU8K_RAM_MEM_START 0x200000
 #define EMU8K_FM_MEM_ADDRESS 0xFFFFE0
@@ -414,8 +413,6 @@ typedef struct emu8k_t
         uint32_t ram_end_addr;
 
         int cur_reg, cur_voice;
-        
-        int16_t out_l, out_r;
         
         emu8k_chorus_eng_t chorus_engine;
         int32_t chorus_in_buffer[MAXSOUNDBUFLEN];

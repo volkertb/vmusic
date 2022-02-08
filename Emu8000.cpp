@@ -84,7 +84,7 @@ typedef PCMOutWin PCMOutBackend;
 #define EMU_DEFAULT_SAMPLE_RATE     44100 /* Hz */
 #define EMU_NUM_CHANNELS            2
 
-#define EMU_DEFAULT_ONBOARD_RAM     (8 * 1024) /* KiB */
+#define EMU_DEFAULT_RAM_SIZE        (8 * _1M)
 
 enum {
     EMU_PORT_DATA0    = 0,
@@ -114,8 +114,8 @@ typedef struct {
     RTIOPORT               uPort;
     /** Sample rate for PCM output. */
     uint16_t               uSampleRate;
-    /** Size of onboard RAM in KiB. */
-    uint16_t               uOnboardRAM;
+    /** Size of onboard RAM. */
+    uint32_t               uRAMSize;
     /** Path to find ROM file. */
     R3PTRTYPE(char *)      pszROMFile;
     /** Device for PCM output. */
@@ -138,10 +138,12 @@ typedef struct {
     /** (Virtual clock) timestamp of last frame rendered. */
     uint64_t               tmLastRender;
 
-    /** To protect access to opl3_chip from the render thread and main thread. */
-    RTCRITSECT             critSect;
+    /** To protect access to emu8k_t from the render thread and main thread. */
+    PDMCRITSECT            critSect;
     /** Handle to emu8k. */
     R3PTRTYPE(emu8k_t*)    emu;
+    /** Onboard RAM. */
+    R3PTRTYPE(void*)       ram;
     /** Contents of ROM file. */
     R3PTRTYPE(void*)       rom;
 
@@ -168,8 +170,6 @@ DECLINLINE(size_t) emuCalculateBytesFromFrames(PEMUSTATE pThis, uint64_t frames)
     NOREF(pThis);
     return frames * sizeof(uint16_t) * EMU_NUM_CHANNELS;
 }
-
-
 
 /**
  * The render thread calls into the emulator to render audio frames, and then pushes them
@@ -200,10 +200,10 @@ static DECLCALLBACK(int) emuRenderThread(RTTHREAD ThreadSelf, void *pvUser)
            && ASMAtomicReadU64(&pThis->tmLastWrite) + EMU_RENDER_SUSPEND_TIMEOUT >= RTTimeSystemMilliTS()) {
         Log9(("rendering %lld frames\n", buf_frames));
 
-        RTCritSectEnter(&pThis->critSect);
+        PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
         emu8k_render(pThis->emu, buf, buf_frames);
         pThis->tmLastRender = PDMDevHlpTMTimeVirtGetNano(pDevIns);
-        RTCritSectLeave(&pThis->critSect);
+        PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 
         Log9(("writing %lld frames\n", buf_frames));
 
@@ -304,7 +304,7 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortRead(PPDMDEVINS pDevIns, void *pvUser
 
     PEMUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
 
-    RTCritSectEnter(&pThis->critSect);
+    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
     uint64_t frames_since_last_render = emuCalculateFramesFromNano(pThis, PDMDevHlpTMTimeVirtGetNano(pDevIns) - pThis->tmLastRender);
     emu8k_update_virtual_sample_count(pThis->emu, frames_since_last_render);
 
@@ -324,7 +324,7 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortRead(PPDMDEVINS pDevIns, void *pvUser
             break;
     }
 
-    RTCritSectLeave(&pThis->critSect);
+    PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 
     Log9Func(("read port 0x%X (%u): %#04x\n", port, cb, *pu32));
 
@@ -342,7 +342,7 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortWrite(PPDMDEVINS pDevIns, void *pvUse
 
     PEMUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
 
-    RTCritSectEnter(&pThis->critSect);
+    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
 
     switch (cb) {
         case sizeof(uint8_t):
@@ -359,7 +359,7 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortWrite(PPDMDEVINS pDevIns, void *pvUse
             break;
     }
 
-    RTCritSectLeave(&pThis->critSect);
+    PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 
     emuWakeRenderThread(pDevIns);
 
@@ -374,10 +374,12 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortWrite(PPDMDEVINS pDevIns, void *pvUse
 static DECLCALLBACK(int) emuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM)
 {
     PEMUSTATE     pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
-    PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
+    PCPDMDEVHLPR3 pHlp  = pDevIns->pHlpR3;
 
-    // TODO: Save contents of ROM & RAM?
-    RT_NOREF(pSSM, pThis, pHlp);
+    pHlp->pfnSSMPutU32(pSSM, pThis->uRAMSize);
+    pHlp->pfnSSMPutMem(pSSM, pThis->ram, pThis->uRAMSize);
+
+    // TODO Should save the rest of the device state, too.
 
 	return 0;
 }
@@ -388,13 +390,20 @@ static DECLCALLBACK(int) emuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM)
 static DECLCALLBACK(int) emuR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM, uint32_t uVersion, uint32_t uPass)
 {
     PEMUSTATE     pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
-    PCPDMDEVHLPR3   pHlp  = pDevIns->pHlpR3;
+    PCPDMDEVHLPR3 pHlp  = pDevIns->pHlpR3;
 
     Assert(uPass == SSM_PASS_FINAL);
     NOREF(uPass);
 
-    // TODO
-    RT_NOREF(pSSM, pThis, pHlp);
+    uint32_t uRAMSize = pThis->uRAMSize;
+    pHlp->pfnSSMGetU32(pSSM, &uRAMSize);
+
+    if (uRAMSize == pThis->uRAMSize) {
+        pHlp->pfnSSMGetMem(pSSM, pThis->ram, uRAMSize);
+    } else {
+        LogWarn(("emu8000#%d: RAM size has changed, ignoring saved RAM contents\n", pDevIns->iInstance));
+        pHlp->pfnSSMSkip(pSSM, uRAMSize);
+    }
 
     pThis->tmLastWrite = RTTimeSystemMilliTS();
 
@@ -414,10 +423,10 @@ static DECLCALLBACK(void) emuR3Reset(PPDMDEVINS pDevIns)
 {
     PEMUSTATE   pThis   = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
     
-    RTCritSectEnter(&pThis->critSect);
+    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
     emu8k_reset(pThis->emu);
     pThis->tmLastRender = PDMDevHlpTMTimeVirtGetNano(pDevIns);
-    RTCritSectLeave(&pThis->critSect);
+    PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 }
 
 /**
@@ -449,17 +458,17 @@ static DECLCALLBACK(int) emuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
     Assert(iInstance == 0);
 
     // Validate and read the configuration
-    PDMDEV_VALIDATE_CONFIG_RETURN(pDevIns, "Port|OnboardRAM|ROMFile|OutDevice|SampleRate", "");
+    PDMDEV_VALIDATE_CONFIG_RETURN(pDevIns, "Port|RamSize|RomFile|OutDevice|SampleRate", "");
 
     rc = pHlp->pfnCFGMQueryPortDef(pCfg, "Port", &pThis->uPort, EMU_DEFAULT_IO_BASE);
     if (RT_FAILURE(rc))
         return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"Port\" from the config"));
 
-    rc = pHlp->pfnCFGMQueryU16Def(pCfg, "Port", &pThis->uOnboardRAM, EMU_DEFAULT_ONBOARD_RAM);
+    rc = pHlp->pfnCFGMQueryU32Def(pCfg, "RamSize", &pThis->uRAMSize, EMU_DEFAULT_RAM_SIZE);
     if (RT_FAILURE(rc))
         return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"OnboardRAM\" from the config"));
 
-    rc = pHlp->pfnCFGMQueryStringAlloc(pCfg, "ROMFile", &pThis->pszROMFile);
+    rc = pHlp->pfnCFGMQueryStringAlloc(pCfg, "RomFile", &pThis->pszROMFile);
     if (RT_FAILURE(rc))
         return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to query \"RomFile\" from the config"));
 
@@ -476,38 +485,42 @@ static DECLCALLBACK(int) emuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
     uint64_t uROMSize;
     rc = RTFileOpen(&fROM, pThis->pszROMFile, RTFILE_O_READ | RTFILE_O_OPEN | RTFILE_O_DENY_WRITE);
     if (RT_FAILURE(rc))
-        return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to open ROMFile"));
+        return PDMDEV_SET_ERROR(pDevIns, rc, N_("emu8000: Failed to open ROMFile"));
 
     rc = RTFileQuerySize(fROM, &uROMSize);
     if (RT_FAILURE(rc) || uROMSize != _1M)
-        return PDMDEV_SET_ERROR(pDevIns, rc, N_("ROMFile is not of correct size (expecting 1MiB file)"));
+        return PDMDEV_SET_ERROR(pDevIns, rc, N_("emu8000: ROMFile is not of correct size (expecting 1MiB file)"));
 
-    pThis->rom = RTMemAlloc(uROMSize);
+    pThis->rom = PDMDevHlpMMHeapAlloc(pDevIns, uROMSize);
     AssertPtrReturn(pThis->rom, VERR_NO_MEMORY);
 
     rc = RTFileRead(fROM, pThis->rom, uROMSize, NULL);
     if (RT_FAILURE(rc))
-        return PDMDEV_SET_ERROR(pDevIns, rc, N_("Failed to read ROMFile"));
+        return PDMDEV_SET_ERROR(pDevIns, rc, N_("emu8000: Failed to read ROMFile"));
+
+    // Allocate RAM
+    pThis->ram = PDMDevHlpMMHeapAllocZ(pDevIns, pThis->uRAMSize);
+    AssertPtrReturn(pThis->ram, VERR_NO_MEMORY);
 
     // Create the device
-    pThis->emu = emu8k_alloc(pThis->rom, pThis->uOnboardRAM);
+    pThis->emu = emu8k_alloc(pThis->rom, pThis->ram, pThis->uRAMSize);
     AssertPtrReturn(pThis->emu, VERR_NO_MEMORY);
 
-    // Initialize the device
-    emuR3Reset(pDevIns);
-
-    /* Initialize now the buffer that will be used by the render thread. */
+    // Initialize now the buffer that will be used by the render thread.
     size_t renderBlockSize = emuCalculateBytesFromFrames(pThis, emuCalculateFramesFromMilli(pThis, EMU_RENDER_BLOCK_TIME));
     pThis->pbRenderBuf = (uint8_t *) RTMemAlloc(renderBlockSize);
     AssertPtrReturn(pThis->pbRenderBuf, VERR_NO_MEMORY);
 
-    /* Prepare the render thread, but not create it yet. */
+    // Prepare the render thread, but not create it yet.
     pThis->fShutdown = false;
     pThis->fStopped = false;
     pThis->hRenderThread = NIL_RTTHREAD;
     pThis->tmLastWrite = 0;
-    rc = RTCritSectInit(&pThis->critSect);
+    rc = PDMDevHlpCritSectInit(pDevIns, &pThis->critSect, RT_SRC_POS, "emu8000#%d", iInstance);
     AssertRCReturn(rc, rc);
+
+    // Initialize the device.
+    emuR3Reset(pDevIns);
 
     // Register IO ports.
     const RTIOPORT numPorts = sizeof(uint32_t); // Each port is a "doubleword" or at least 2 words.
@@ -521,13 +534,11 @@ static DECLCALLBACK(int) emuR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGM
                                           emuIoPortWrite, emuIoPortRead, "EMU8000 Data3/Ptr", NULL, &pThis->hIoPorts[3]);
     AssertRCReturn(rc, rc);
 
-    /*
-     * Register saved state.
-     */
+    // Register saved state.
     rc = PDMDevHlpSSMRegister(pDevIns, EMU_SAVED_STATE_VERSION, sizeof(*pThis), emuR3SaveExec, emuR3LoadExec);
     AssertRCReturn(rc, rc);
 
-    LogRel(("emu8000#%i: Using %hu KiB of onboard RAM\n", iInstance, pThis->uOnboardRAM));
+    LogRel(("emu8000#%i: Using %hu KiB of onboard RAM\n", iInstance, pThis->uRAMSize / _1K));
 
     LogRel(("emu8000#%i: Configured on ports 0x%X-0x%X, 0x%X-0x%X, 0x%X-0x%X\n", iInstance,
             pThis->uPort + EMU_PORT_DATA0, pThis->uPort + EMU_PORT_DATA0 + numPorts - 1,
@@ -548,7 +559,7 @@ static DECLCALLBACK(int) emuR3Destruct(PPDMDEVINS pDevIns)
     emuStopRenderThread(pDevIns, true);
 
     if (pThis->pbRenderBuf) {
-        RTMemFree(pThis->pbRenderBuf);
+        PDMDevHlpMMHeapFree(pDevIns, pThis->pbRenderBuf);
         pThis->pbRenderBuf = NULL;
     }
 
@@ -562,10 +573,17 @@ static DECLCALLBACK(int) emuR3Destruct(PPDMDEVINS pDevIns)
         pThis->emu = NULL;
     }
 
+    if (pThis->ram) {
+        PDMDevHlpMMHeapFree(pDevIns, pThis->ram);
+        pThis->ram = NULL;
+    }
+
     if (pThis->rom) {
-        RTMemFree(pThis->rom);
+        PDMDevHlpMMHeapFree(pDevIns, pThis->rom);
         pThis->rom = NULL;
     }
+
+    PDMDevHlpCritSectDelete(pDevIns, &pThis->critSect);
 
     return VINF_SUCCESS;
 }

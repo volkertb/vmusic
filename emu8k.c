@@ -2321,7 +2321,7 @@ static void emu8k_init_globals()
     }
 }
 
-emu8k_t* emu8k_alloc(void *rom, size_t onboard_ram)
+emu8k_t* emu8k_alloc(void *rom, void *ram, size_t ram_size)
 {
     emu8k_t *emu8k = RTMemAlloc(sizeof(emu8k_t));
     AssertPtrReturn(emu8k, NULL);
@@ -2329,6 +2329,7 @@ emu8k_t* emu8k_alloc(void *rom, size_t onboard_ram)
     emu8k_init_globals();
 
     emu8k->rom = rom;
+    emu8k->ram = ram;
 
     /*AWE-DUMP creates ROM images offset by 2 bytes, so if we detect this
       then correct it*/
@@ -2352,24 +2353,22 @@ emu8k_t* emu8k_alloc(void *rom, size_t onboard_ram)
             emu8k->ram_pointers[j] = emu8k->empty;
     }
 
-    if (onboard_ram > 0)
+    if (ram_size > 0)
     {
             /*Clip to 28MB, since that's the max that we can address. */
-            Assert(onboard_ram <= 0x7000);
-            emu8k->ram = RTMemAllocZ(onboard_ram * _1K);
+            Assert(ram_size <= 28 * _1M);
             AssertPtr(emu8k->ram);
 
-            const int i_end = onboard_ram >> 7;
+            const int i_end = ram_size / (sizeof(uint16_t) * BLOCK_SIZE_WORDS);
             int i = 0;
             for (; i < i_end; i++, j++)
             {
                     emu8k->ram_pointers[j] = emu8k->ram + (i * BLOCK_SIZE_WORDS);
             }
-            emu8k->ram_end_addr = EMU8K_RAM_MEM_START + (onboard_ram << 9);
+            emu8k->ram_end_addr = EMU8K_RAM_MEM_START + (ram_size / sizeof(uint16_t));
     }
     else
     {
-            emu8k->ram = NULL;
             emu8k->ram_end_addr = EMU8K_RAM_MEM_START;
     }
     for (; j < 0x100; j++)
@@ -2384,8 +2383,6 @@ emu8k_t* emu8k_alloc(void *rom, size_t onboard_ram)
 void emu8k_free(emu8k_t* emu8k)
 {
     RTMemFree(emu8k->empty);
-    RTMemFree(emu8k->ram);
-
     RTMemFree(emu8k);
 }
 

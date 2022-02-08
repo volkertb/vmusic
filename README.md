@@ -59,7 +59,7 @@ VBoxManage setextradata "$vm" VBoxInternal/Devices/mpu401/0/Trusted 1
 # To enable the Adlib device
 VBoxManage setextradata "$vm" VBoxInternal/Devices/adlib/0/Trusted 1
 # To enable the EMU8000 device
-VBoxManage setextradata "$vm" VBoxInternal/Devices/emu8000/0/Config/ROMFile "$HOME/.pcem/roms/awe32.raw"
+VBoxManage setextradata "$vm" VBoxInternal/Devices/emu8000/0/Config/RomFile "$HOME/.pcem/roms/awe32.raw"
 
 # Optional: to enable the Adlib device on the default SB16 ports too
 VBoxManage setextradata "$vm" VBoxInternal/Devices/adlib/0/Config/MirrorPort "0x220"

@@ -48,7 +48,7 @@ extern "C" {
 
 typedef struct emu8k_t emu8k_t;
 
-emu8k_t* emu8k_alloc(void *rom, size_t onboard_ram);
+emu8k_t* emu8k_alloc(void *rom, void *ram, size_t ram_size);
 void emu8k_free(emu8k_t *emu8k);
 
 void emu8k_reset(emu8k_t *emu8k);
