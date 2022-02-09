@@ -41,6 +41,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <VBox/vmm/ssm.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +67,8 @@ void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint16_t sample_count);
 /*  Many programs seem to rely in this counter incrementing frequently, and may hang/error out if it doesn't.
  *  It is reset to 0 whenever we render and therefore increment the real sample count.
  *  This means that effectively the sample count register may readjust itself (go back or jump ahead) on _render :(. */
+
+extern const struct SSMFIELD g_emu8k_fields[];
 
 #ifdef __cplusplus
 } /* extern "C" */

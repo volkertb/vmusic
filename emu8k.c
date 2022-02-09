@@ -44,6 +44,7 @@
 #include <iprt/string.h>
 #include <iprt/mem.h>
 
+#include "emu8k.h"
 #include "emu8k_internal.h"
 
 #define pclog(...) LogFlow((__VA_ARGS__))
@@ -2416,6 +2417,7 @@ void emu8k_reset(emu8k_t* emu8k)
 
 void emu8k_render(emu8k_t *emu8k, int16_t *buf, size_t frames)
 {
+    emu8k->pos = 0;
     emu8k_update(emu8k, frames);
 
     // Convert from int32_t samples to int16_t
@@ -2423,8 +2425,6 @@ void emu8k_render(emu8k_t *emu8k, int16_t *buf, size_t frames)
     {
         buf[i] = RT_CLAMP(emu8k->buffer[i], INT16_MIN, INT16_MAX);
     }
-
-    emu8k->pos = 0;
 }
 
 void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint16_t sample_count)
@@ -2436,3 +2436,36 @@ void emu8k_update_virtual_sample_count(emu8k_t *emu8k, uint16_t sample_count)
 #endif
     emu8k->sample_count_virtual = sample_count;
 }
+
+const struct SSMFIELD g_emu8k_fields[] =
+{
+    SSMFIELD_ENTRY(emu8k_t, hwcf1),
+    SSMFIELD_ENTRY(emu8k_t, hwcf2),
+    SSMFIELD_ENTRY(emu8k_t, hwcf3),
+    SSMFIELD_ENTRY(emu8k_t, hwcf4),
+    SSMFIELD_ENTRY(emu8k_t, hwcf5),
+    SSMFIELD_ENTRY(emu8k_t, hwcf6),
+    SSMFIELD_ENTRY(emu8k_t, hwcf7),
+    SSMFIELD_ENTRY(emu8k_t, init1),
+    SSMFIELD_ENTRY(emu8k_t, init2),
+    SSMFIELD_ENTRY(emu8k_t, init3),
+    SSMFIELD_ENTRY(emu8k_t, init4),
+    SSMFIELD_ENTRY(emu8k_t, smalr),
+    SSMFIELD_ENTRY(emu8k_t, smarr),
+    SSMFIELD_ENTRY(emu8k_t, smalw),
+    SSMFIELD_ENTRY(emu8k_t, smarw),
+    SSMFIELD_ENTRY(emu8k_t, smld_buffer),
+    SSMFIELD_ENTRY(emu8k_t, smrd_buffer),
+    SSMFIELD_ENTRY(emu8k_t, sample_count),
+    SSMFIELD_ENTRY(emu8k_t, id),
+    SSMFIELD_ENTRY(emu8k_t, cur_reg),
+    SSMFIELD_ENTRY(emu8k_t, cur_voice),
+
+    SSMFIELD_ENTRY(emu8k_t, voice),
+
+    SSMFIELD_ENTRY(emu8k_t, chorus_engine),
+    SSMFIELD_ENTRY(emu8k_t, reverb_engine),
+
+    SSMFIELD_ENTRY_TERM()
+};
+

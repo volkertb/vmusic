@@ -377,9 +377,9 @@ static DECLCALLBACK(int) emuR3SaveExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM)
     pHlp->pfnSSMPutU32(pSSM, pThis->uRAMSize);
     pHlp->pfnSSMPutMem(pSSM, pThis->ram, pThis->uRAMSize);
 
-    // TODO Should save the rest of the device state, too.
+    pHlp->pfnSSMPutStruct(pSSM, pThis->emu, g_emu8k_fields);
 
-	return 0;
+    return 0;
 }
 
 /**
@@ -402,6 +402,8 @@ static DECLCALLBACK(int) emuR3LoadExec(PPDMDEVINS pDevIns, PSSMHANDLE pSSM, uint
         LogWarn(("emu8000#%d: RAM size has changed, ignoring saved RAM contents\n", pDevIns->iInstance));
         pHlp->pfnSSMSkip(pSSM, uRAMSize);
     }
+
+    pHlp->pfnSSMGetStruct(pSSM, pThis->emu, g_emu8k_fields);
 
     pThis->tmLastWrite = RTTimeSystemMilliTS();
 
