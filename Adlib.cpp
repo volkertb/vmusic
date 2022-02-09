@@ -78,7 +78,7 @@ typedef PCMOutWin PCMOutBackend;
 #define ADLIB_DEFAULT_IO_BASE         0x388
 
 #define ADLIB_DEFAULT_OUT_DEVICE    "default"
-#define ADLIB_DEFAULT_SAMPLE_RATE   22050 /* Hz */
+#define ADLIB_DEFAULT_SAMPLE_RATE   49716 /* Hz */
 #define ADLIB_NUM_CHANNELS          2 /* as we are actually supporting OPL3 */
 
 enum {
@@ -175,7 +175,7 @@ static inline size_t adlibCalculateBytesFromFrames(PADLIBSTATE pThis, uint64_t f
 static uint64_t adlibCalculateTimerExpire(PPDMDEVINS pDevIns, uint8_t value, uint64_t period)
 {
     uint64_t delay_usec = (0x100 - value) * period;
-    if (delay_usec < 100)  delay_usec = 0; // short delay: Likely just checking for OPL precense; fire timer now.
+    if (delay_usec < 100)  delay_usec = 0; // short delay: Likely just checking for OPL presence; fire timer now.
     uint64_t freq = PDMDevHlpTMTimeVirtGetFreq(pDevIns);
     uint64_t delay_ticks = (delay_usec * freq) / 1000000UL /*1usec in hz*/;
     uint64_t now_ticks = PDMDevHlpTMTimeVirtGet(pDevIns);
