@@ -47,8 +47,6 @@
 /*********************************************************************************************************************************
 *   Header Files                                                                                                                 *
 *********************************************************************************************************************************/
-#define LOG_ENABLED 1
-#define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
     // Log level 3 is used for register reads/writes
     // Log level 7 is used for all port in/out
@@ -95,10 +93,10 @@ enum {
 #define ADLIB_SAVED_STATE_VERSION     1
 
 /** Maximum number of sound samples render in one batch by render thread. */
-#define ADLIB_RENDER_BLOCK_TIME     5 /* in millisec */
+#define ADLIB_RENDER_BLOCK_TIME       5 /* in millisec */
 
 /** The render thread will shutdown if this time passes since the last OPL register write. */
-#define ADLIB_RENDER_SUSPEND_TIMEOUT 5000 /* in millisec */
+#define ADLIB_RENDER_SUSPEND_TIMEOUT  5000 /* in millisec */
 
 #define OPL2_NUM_IO_PORTS       2
 #define OPL3_NUM_IO_PORTS       4

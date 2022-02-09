@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#define LOG_ENABLED 1
-#define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
 
 #include <VBox/err.h>

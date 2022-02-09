@@ -1,7 +1,15 @@
-
+# Settings
 # Either linux.amd64 or win.amd64
 OS:=linux
 ARCH:=amd64
+
+CFLAGS?=-O2 -g -pipe
+CXXFLAGS?=-O2 -g -pipe
+
+# 1 enables verbose logging
+#LOG:=1
+
+# Settings end here
 
 # Directories
 VBOXSRC:=VirtualBox.src
@@ -45,10 +53,18 @@ CXX=g++
 endif
 
 # Compiler flags
-VBOX_DEFINES:=-DVBOX_HAVE_VISIBILITY_HIDDEN -DRT_USE_VISIBILITY_DEFAULT -DVBOX -DVBOX_OSE -DVBOX_WITH_64_BITS_GUESTS -DVBOX_WITH_DEBUGGER -DIN_RING3 -DGC_ARCH_BITS=64 -DVBOX_WITH_DTRACE -DVBOX_WITH_DTRACE_R3 -DPIC -DVBOX_IN_EXTPACK -DVBOX_IN_EXTPACK_R3 -DHC_ARCH_BITS=64
-VBOX_CFLAGS:=-pedantic -Wshadow -Wall -Wextra -Wno-missing-field-initializers -Wno-unused -Wno-trigraphs -fdiagnostics-show-option -Wno-unused-parameter  -Wlogical-op  -Wno-variadic-macros -Wno-long-long -Wunused-variable -Wunused-function -Wunused-label -Wunused-parameter  -Wno-array-bounds -Wno-ignored-qualifiers -Wno-variadic-macros -fno-omit-frame-pointer -fno-strict-aliasing -fvisibility=hidden  -fno-exceptions -I$(VBOXSRC)/include -Iinclude
+ifeq "$(LOG)" "1"
+VMUSIC_DEFINES:=-DLOG_ENABLED=1 -DLOG_ENABLE_FLOW=1
+endif
+
+VBOX_DEFINES:=-DVBOX_HAVE_VISIBILITY_HIDDEN -DRT_USE_VISIBILITY_DEFAULT -DVBOX -DVBOX_OSE -DVBOX_WITH_64_BITS_GUESTS -DVBOX_WITH_DEBUGGER \
+    -DIN_RING3 -DGC_ARCH_BITS=64 -DVBOX_WITH_DTRACE -DVBOX_WITH_DTRACE_R3 -DPIC -DVBOX_IN_EXTPACK -DVBOX_IN_EXTPACK_R3 -DHC_ARCH_BITS=64
+VBOX_CFLAGS:=-fPIC -m64 -pedantic -Wshadow -Wall -Wextra \
+    -Wno-missing-field-initializers -Wno-unused -Wno-trigraphs -fdiagnostics-show-option -Wno-unused-parameter -Wlogical-op  -Wno-variadic-macros -Wno-long-long -Wunused-variable -Wunused-function -Wunused-label -Wunused-parameter  -Wno-array-bounds -Wno-ignored-qualifiers -Wno-variadic-macros -fno-omit-frame-pointer -fno-strict-aliasing \
+    -fvisibility=hidden -fno-exceptions \
+    -I$(VBOXSRC)/include -Iinclude
 VBOX_CXXFLAGS:=$(VBOX_CFLAGS) -Wno-overloaded-virtual -fvisibility-inlines-hidden -fno-rtti
-VBOX_LDFLAGS:=
+VBOX_LDFLAGS:=-fPIC -m64
 VBOX_LIBS:=$(VBOXBIN)/VBoxRT.$(SO) $(VBOXBIN)/VBoxVMM.$(SO)
 
 ifeq "$(OS)" "win"
@@ -71,25 +87,25 @@ $(OUTDIR) $(OBJDIR) $(OBJOSDIR) $(OUTOSDIR): %:
 	mkdir -p $@
 
 $(OBJOSDIR)/%.o: %.cpp | $(OBJOSDIR)
-	$(CXX) -c -O2 -g -pipe -fPIC -m64 $(VBOX_CXXFLAGS) $(VBOX_DEFINES) -o $@ $<
+	$(CXX) -c $(VBOX_CXXFLAGS) $(VBOX_DEFINES) $(VMUSIC_DEFINES) $(CXXFLAGS) -o $@ $<
 
 $(OBJOSDIR)/%.o: %.c | $(OBJOSDIR)
-	$(CC) -c -O2 -g -pipe -fPIC -m64 $(VBOX_CFLAGS) $(VBOX_DEFINES) -o $@ $<
+	$(CC) -c $(VBOX_CFLAGS) $(VBOX_DEFINES) $(VMUSIC_DEFINES) $(CFLAGS) -o $@ $<
 
 $(OUTOSDIR)/VMusicMain.$(SO): $(OBJOSDIR)/VMusicMain.o | $(OUTOSDIR)
-	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS)
+	$(CXX) -shared $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS)
 
 $(OUTOSDIR)/VMusicMainVM.$(SO): $(OBJOSDIR)/VMusicMainVM.o | $(OUTOSDIR)
-	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS)
+	$(CXX) -shared $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS)
 	
 $(OUTOSDIR)/AdlibR3.$(SO): $(ADLIBR3OBJ) | $(OUTOSDIR)
-	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(ADLIBR3LIBS)
+	$(CXX) -shared $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(ADLIBR3LIBS)
 
 $(OUTOSDIR)/Mpu401R3.$(SO): $(MPU401R3OBJ) | $(OUTOSDIR)
-	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(MPU401R3LIBS)
+	$(CXX) -shared $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(MPU401R3LIBS)
 
 $(OUTOSDIR)/Emu8000R3.$(SO): $(EMU8000R3OBJ) | $(OUTOSDIR)
-	$(CXX) -shared -fPIC -m64 $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(EMU8000R3LIBS)
+	$(CXX) -shared $(VBOX_LDFLAGS) -o $@ $+ $(VBOX_LIBS) $(EMU8000R3LIBS)
 
 $(OUTDIR)/ExtPack.xml: ExtPack.xml
 	install -m 0644 $< $@

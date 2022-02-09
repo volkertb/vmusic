@@ -47,8 +47,6 @@
 /*********************************************************************************************************************************
 *   Header Files                                                                                                                 *
 *********************************************************************************************************************************/
-#define LOG_ENABLED 1
-#define LOG_ENABLE_FLOW 1
 #define LOG_GROUP LOG_GROUP_DEV_SB16
     // Log level 3 is used for commands, responses, etc.
     // Log level 5 is used for MIDI data in/out

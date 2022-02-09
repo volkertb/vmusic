@@ -11,4 +11,6 @@ fi
 
 source scripts/logenv.sh
 
+# --debug
+
 exec /usr/lib/virtualbox/VirtualBoxVM --startvm "$vm"
