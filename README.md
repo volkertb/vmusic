@@ -41,7 +41,7 @@ drivers post-SB16 already use the MPU-401 device.
 
 # Installing
 
-You can try using the [VMusic.vbox-extpack](http://depot.javispedro.com/vbox/VMusic-0.3-vbox6.1.32.vbox-extpack)
+You can try using the [VMusic.vbox-extpack](http://depot.javispedro.com/vbox/VMusic-0.3.1-vbox6.1.32.vbox-extpack)
 I built for VirtualBox 6.1.32,
 which you can install into VirtualBox through the VirtualBox Preferences -> Extension Packs GUI,
 or by running `VBoxManage extpack install VMusic.vbox-extpack`.
@@ -143,6 +143,10 @@ E.g. copy `/usr/lib/virtualbox/VBoxRT.so` into `VirtualBox.linux.amd64/VBoxRT.so
 After this, just type `make` followed by `make pack` and `VMusic.vbox-extpack` should be generated.
 
 # Changelog
+
+* v0.3.1 EMU8000 RAM is now saved in snapshots,
+ OPL emulator uses 49716Hz sample rate by default now,
+ renamed some config settings.
 
 * v0.3 added support in MPU-401 for UART-mode MIDI input, and the EMU8000 device.
 
