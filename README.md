@@ -33,19 +33,25 @@ You can enable each device independently, e.g. to have pure MPU-401 only.
 Note that "SB MIDI" support is not implemented; for MIDI out you can only use the MPU-401 device. Most Sound Blaster
 drivers post-SB16 already use the MPU-401 device.
 
+[TOC]
+
 ### Screenshots
 
-![Screenshot of VirtualBox playing The Secret of Monkey Island while connected to the Munt MT-32 Emulator](http://depot.javispedro.com/vbox/VirtualBoxMunt.png)
+<img src="https://depot.javispedro.com/vbox/VBoxPrefs.png" alt="VirtualBox Preferences dialog showing Extensions panel with VMusic installed" style="max-width: 40%; vertical-align:top;" />
+<img src="https://depot.javispedro.com/vbox/win98e.png" alt="Screenshot of Windows 98 playing CANYON.MID while showing all the 3 devices available for MIDI output" style="max-width: 40%; vertical-align:top;" />
 
-![Screenshot of Windows 98 playing CANYON.MID while showing all the 3 devices available for MIDI output](http://depot.javispedro.com/vbox/win98e.png)
+<img src="https://depot.javispedro.com/vbox/VirtualBoxMunt.png" alt="Screenshot of VirtualBox playing The Secret of Monkey Island while connected to the Munt MT-32 Emulator" style="max-width: 70%;" />
+
 
 # Installing
 
-You can try using the [VMusic.vbox-extpack](http://depot.javispedro.com/vbox/VMusic-0.3.1-vbox6.1.32.vbox-extpack)
-I built for VirtualBox 6.1.32,
-which you can install into VirtualBox through the VirtualBox Preferences -> Extension Packs GUI,
-or by running `VBoxManage extpack install VMusic.vbox-extpack`.
-This should work at least for most other recent versions in the 6.1.x series.
+1.  Download [VMusic.vbox-extpack](https://depot.javispedro.com/vbox/VMusic-0.3.1-vbox6.1.32.vbox-extpack).
+    This is built for VirtualBox 6.1.32, albeit it should work for most other recent versions in the 6.1.x series.
+
+2.  Open VirtualBox, go to File → Preferences → [Extension packs](https://depot.javispedro.com/vbox/VBoxPrefs.png),
+    and add the downloaded VMusic-_something_.vbox-extpack file.
+
+Alternatively, run `VBoxManage extpack install VMusic.vbox-extpack` on a terminal.
 
 # Using
 
