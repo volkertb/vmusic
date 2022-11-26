@@ -32,11 +32,10 @@
 
 #include <VBox/err.h>
 #include <VBox/version.h>
-#include <VBox/vmm/cfgm.h>
+#include <VBox/vmm/vmmr3vtable.h>
 #include <iprt/string.h>
 #include <iprt/param.h>
 #include <iprt/path.h>
-#include <iprt/log.h>
 
 /*********************************************************************************************************************************
 *   Global Variables                                                                                                             *
@@ -58,15 +57,18 @@ static PCVBOXEXTPACKHLP g_pHlp;
 /**
  * @interface_method_impl{VBOXEXTPACKVMREG,pfnVMConfigureVMM}
  */
-static DECLCALLBACK(int)  vMusicExtPackVM_VMConfigureVMM(PCVBOXEXTPACKVMREG pThis, VBOXEXTPACK_IF_CS(IConsole) *pConsole, PVM pVM)
+static DECLCALLBACK(int)  vMusicExtPackVM_VMConfigureVMM(PCVBOXEXTPACKVMREG pThis, VBOXEXTPACK_IF_CS(IConsole) *pConsole,
+                                                         PVM pVM, PCVMMR3VTABLE pVMM)
 {
     RT_NOREF(pThis, pConsole);
 
-    PCFGMNODE pCfgRoot = CFGMR3GetRoot(pVM);
+    AssertReturn(VMMR3VTABLE_IS_COMPATIBLE(pVMM->uMagicVersion), VERR_VERSION_MISMATCH);
+
+    PCFGMNODE pCfgRoot = pVMM->pfnCFGMR3GetRoot(pVM);
     AssertReturn(pCfgRoot, VERR_INTERNAL_ERROR_3);
 
     // Assume /PDM/Devices exists.
-    PCFGMNODE pCfgDevices = CFGMR3GetChild(pCfgRoot, "PDM/Devices");
+    PCFGMNODE pCfgDevices = pVMM->pfnCFGMR3GetChild(pCfgRoot, "PDM/Devices");
     AssertReturn(pCfgDevices, VERR_INTERNAL_ERROR_3);
 
     // Find the Adlib module and tell PDM to load it.
@@ -76,9 +78,9 @@ static DECLCALLBACK(int)  vMusicExtPackVM_VMConfigureVMM(PCVBOXEXTPACKVMREG pThi
         return rc;
 
     PCFGMNODE pCfgMine;
-    rc = CFGMR3InsertNode(pCfgDevices, "Adlib", &pCfgMine);
+    rc = pVMM->pfnCFGMR3InsertNode(pCfgDevices, "Adlib", &pCfgMine);
     AssertRCReturn(rc, rc);
-    rc = CFGMR3InsertString(pCfgMine, "Path", szPath);
+    rc = pVMM->pfnCFGMR3InsertString(pCfgMine, "Path", szPath);
     AssertRCReturn(rc, rc);
 
     // Likewise for MPU-401 module
@@ -86,9 +88,9 @@ static DECLCALLBACK(int)  vMusicExtPackVM_VMConfigureVMM(PCVBOXEXTPACKVMREG pThi
     if (RT_FAILURE(rc))
         return rc;
 
-    rc = CFGMR3InsertNode(pCfgDevices, "Mpu401", &pCfgMine);
+    rc = pVMM->pfnCFGMR3InsertNode(pCfgDevices, "Mpu401", &pCfgMine);
     AssertRCReturn(rc, rc);
-    rc = CFGMR3InsertString(pCfgMine, "Path", szPath);
+    rc = pVMM->pfnCFGMR3InsertString(pCfgMine, "Path", szPath);
     AssertRCReturn(rc, rc);
 
     // Likewise for Emu8000 module
@@ -96,9 +98,9 @@ static DECLCALLBACK(int)  vMusicExtPackVM_VMConfigureVMM(PCVBOXEXTPACKVMREG pThi
     if (RT_FAILURE(rc))
         return rc;
 
-    rc = CFGMR3InsertNode(pCfgDevices, "Emu8000", &pCfgMine);
+    rc = pVMM->pfnCFGMR3InsertNode(pCfgDevices, "Emu8000", &pCfgMine);
     AssertRCReturn(rc, rc);
-    rc = CFGMR3InsertString(pCfgMine, "Path", szPath);
+    rc = pVMM->pfnCFGMR3InsertString(pCfgMine, "Path", szPath);
     AssertRCReturn(rc, rc);
 
 
@@ -126,6 +128,7 @@ static const VBOXEXTPACKVMREG g_vMusicExtPackVMReg =
 {
     VBOXEXTPACKVMREG_VERSION,
     /* .uVBoxFullVersion =  */  VBOX_FULL_VERSION,
+    /* .pszNlsBaseName =    */  NULL,
     /* .pfnConsoleReady =   */  NULL,
     /* .pfnUnload =         */  NULL,
     /* .pfnVMConfigureVMM = */  vMusicExtPackVM_VMConfigureVMM,

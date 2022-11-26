@@ -198,7 +198,8 @@ static DECLCALLBACK(int) emuRenderThread(RTTHREAD ThreadSelf, void *pvUser)
            && ASMAtomicReadU64(&pThis->tmLastWrite) + EMU_RENDER_SUSPEND_TIMEOUT >= RTTimeSystemMilliTS()) {
         Log9(("rendering %lld frames\n", buf_frames));
 
-        PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+        rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+        PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
         emu8k_render(pThis->emu, buf, buf_frames);
         pThis->tmLastRender = PDMDevHlpTMTimeVirtGetNano(pDevIns);
         PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
@@ -302,7 +303,8 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortRead(PPDMDEVINS pDevIns, void *pvUser
 
     PEMUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
 
-    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    int rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
     uint64_t frames_since_last_render = emuCalculateFramesFromNano(pThis, PDMDevHlpTMTimeVirtGetNano(pDevIns) - pThis->tmLastRender);
     emu8k_update_virtual_sample_count(pThis->emu, frames_since_last_render);
 
@@ -340,7 +342,8 @@ static DECLCALLBACK(VBOXSTRICTRC) emuIoPortWrite(PPDMDEVINS pDevIns, void *pvUse
 
     PEMUSTATE pThis = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
 
-    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    int rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
 
     switch (cb) {
         case sizeof(uint8_t):
@@ -423,7 +426,8 @@ static DECLCALLBACK(void) emuR3Reset(PPDMDEVINS pDevIns)
 {
     PEMUSTATE   pThis   = PDMDEVINS_2_DATA(pDevIns, PEMUSTATE);
     
-    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    int rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
     emu8k_reset(pThis->emu);
     pThis->tmLastRender = PDMDevHlpTMTimeVirtGetNano(pDevIns);
     PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);

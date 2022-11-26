@@ -211,7 +211,8 @@ static DECLCALLBACK(int) adlibRenderThread(RTTHREAD ThreadSelf, void *pvUser)
            && ASMAtomicReadU64(&pThis->tmLastWrite) + ADLIB_RENDER_SUSPEND_TIMEOUT >= RTTimeSystemMilliTS()) {
         Log9(("rendering %lld frames\n", buf_frames));
 
-        PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+        rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+        PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
         OPL3_GenerateStream(&pThis->opl, buf, buf_frames);
         PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
 
@@ -406,7 +407,8 @@ static void adlibWriteRegister(PPDMDEVINS pDevIns, uint16_t reg, uint8_t value)
             break;
 
         default:
-            PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+            int rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+            PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
             OPL3_WriteRegBuffered(&pThis->opl, reg, value);
             PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
             break;
@@ -544,9 +546,11 @@ static DECLCALLBACK(void) adlibR3Reset(PPDMDEVINS pDevIns)
 {
     PADLIBSTATE   pThis   = PDMDEVINS_2_DATA(pDevIns, PADLIBSTATE);
     
-    PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    int rc = PDMDevHlpCritSectEnter(pDevIns, &pThis->critSect, VERR_SEM_BUSY);
+    PDM_CRITSECT_RELEASE_ASSERT_RC_DEV(pDevIns, &pThis->critSect, rc);
     OPL3_Reset(&pThis->opl, pThis->uSampleRate);
     PDMDevHlpCritSectLeave(pDevIns, &pThis->critSect);
+
 	pThis->oplReg = 0;
     pThis->timer1Enable = false;
     pThis->timer1Expire = 0;

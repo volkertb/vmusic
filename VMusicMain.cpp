@@ -79,6 +79,7 @@ static const VBOXEXTPACKREG g_vboxMusicExtPackReg =
 {
     VBOXEXTPACKREG_VERSION,
     /* .uVBoxFullVersion =  */  VBOX_FULL_VERSION,
+    /* .pszNlsBaseName =    */  NULL,
     /* .pfnInstalled =      */  NULL,
     /* .pfnUninstall =      */  NULL,
     /* .pfnVirtualBoxReady =*/  NULL,

@@ -65,7 +65,7 @@ VBOX_CFLAGS:=-fPIC -m64 -pedantic -Wshadow -Wall -Wextra \
     -I$(VBOXSRC)/include -Iinclude
 VBOX_CXXFLAGS:=$(VBOX_CFLAGS) -Wno-overloaded-virtual -fvisibility-inlines-hidden -fno-rtti
 VBOX_LDFLAGS:=-fPIC -m64
-VBOX_LIBS:=$(VBOXBIN)/VBoxRT.$(SO) $(VBOXBIN)/VBoxVMM.$(SO)
+VBOX_LIBS:=$(VBOXBIN)/VBoxRT.$(SO)
 
 ifeq "$(OS)" "win"
 VBOX_DEFINES+=-DRT_OS_WINDOWS -D__WIN__ -D__WIN64__ 

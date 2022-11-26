@@ -45,11 +45,14 @@ drivers post-SB16 already use the MPU-401 device.
 
 # Installing
 
-1.  Download [VMusic.vbox-extpack](https://depot.javispedro.com/vbox/VMusic-0.3.1-vbox6.1.32.vbox-extpack).
-    This is built for VirtualBox 6.1.32, albeit it should work for most other recent versions in the 6.1.x series.
+1.  Download
+    [VMusic-0.3.2-vbox7.0.4.vbox-extpack](https://depot.javispedro.com/vbox/VMusic-0.3.2-vbox7.0.4.vbox-extpack).
+    This is built for VirtualBox 7.0.4, albeit it should work for most other recent versions in the 7.0.x series.
+    For VirtualBox 6.1.x series, please use
+    [VMusic-0.3.1-vbox6.1.32.vbox-extpack](https://depot.javispedro.com/vbox/VMusic-0.3.1-vbox6.1.32.vbox-extpack).
 
-2.  Open VirtualBox, go to File → Preferences → [Extension packs](https://depot.javispedro.com/vbox/VBoxPrefs.png),
-    and add the downloaded VMusic-_something_.vbox-extpack file.
+2.  Open VirtualBox, go to File → Tools → [Extension pack manager](https://depot.javispedro.com/vbox/VBoxPrefs.png),
+    and install the downloaded VMusic-_something_.vbox-extpack file.
 
 Alternatively, run `VBoxManage extpack install VMusic.vbox-extpack` on a terminal.
 
@@ -140,15 +143,19 @@ You need the standard C++ building tools, make, libasound and headers (e.g. `lib
 
 First, ensure that, in the directory where the VMusic source resides, you add two extra directories:
 
-* `VirtualBox.src` containing the unpacked pristine VirtualBox source from [virtualbox.org](https://www.virtualbox.org/wiki/Downloads), e.g. the contents of [VirtualBox-6.1.32.tar.bz2](https://download.virtualbox.org/virtualbox/6.1.32/VirtualBox-6.1.32.tar.bz2).
+* `VirtualBox.src` containing the unpacked pristine VirtualBox source from
+[virtualbox.org](https://www.virtualbox.org/wiki/Downloads), e.g. the contents of
+[VirtualBox-7.0.4.tar.bz2](https://download.virtualbox.org/virtualbox/7.0.4/VirtualBox-7.0.4.tar.bz2).
 
-* `VirtualBox.linux.amd64` containing at least the following VirtualBox Linux.amd64 libraries,
-either from an official installation or your distribution's package: `VBoxRT.so` and `VBoxVMM.so`.
+* `VirtualBox.linux.amd64` containing the VirtualBox runtime library: `VBoxRT.so`.
+Either copy this file from the official VirtualBox Linux build, or from your distribution.
 E.g. copy `/usr/lib/virtualbox/VBoxRT.so` into `VirtualBox.linux.amd64/VBoxRT.so`.
 
 After this, just type `make` followed by `make pack` and `VMusic.vbox-extpack` should be generated.
 
 # Changelog
+
+* v0.3.2 minor changes to fix compatibility with VirtualBox 7.0.0
 
 * v0.3.1 EMU8000 RAM is now saved in snapshots,
  OPL emulator uses 49716Hz sample rate by default now,
